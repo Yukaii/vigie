@@ -87,6 +87,7 @@ export class CrawlStatusService {
   async updateCrawlWithInitialToken(
     crawlId: number,
     token: string,
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     ytcfg: any,
   ): Promise<void> {
     const { error } = await this.db

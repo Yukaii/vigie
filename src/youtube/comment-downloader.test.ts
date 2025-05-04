@@ -50,7 +50,7 @@ const sampleAjaxResponse = {
   ],
 };
 
-let originalFetch: any;
+let originalFetch: unknown;
 
 beforeAll(() => {
   originalFetch = globalThis.fetch;
@@ -58,26 +58,26 @@ beforeAll(() => {
 
 beforeEach(() => {
   let call = 0;
-  globalThis.fetch = (async (...args: any[]) => {
+  globalThis.fetch = (async (...args: unknown[]) => {
     call++;
     if (call === 1) {
       return {
         url: "https://www.youtube.com/watch?v=dummy",
         text: async () => sampleHtml,
-      } as any;
+      } as unknown;
     }
     if (call === 2) {
       return {
         status: 200,
         json: async () => sampleAjaxResponse,
-      } as any;
+      } as unknown;
     }
     throw new Error("Unexpected fetch call");
   }) as unknown as typeof fetch;
 });
 
 afterEach(() => {
-  globalThis.fetch = originalFetch;
+  globalThis.fetch = originalFetch as typeof fetch;
 });
 
 test("should yield comments from getCommentsFromUrl", async () => {
@@ -164,7 +164,7 @@ test("should yield comments from getComments and call callback", async () => {
 // Rickroll test case (real network call)
 test("should yield up to maxComments for Rick Astley video (real fetch)", async () => {
   // Restore the real fetch for this test only
-  globalThis.fetch = originalFetch;
+  globalThis.fetch = originalFetch as typeof fetch;
 
   const comments: YoutubeComment[] = [];
   let count = 0;

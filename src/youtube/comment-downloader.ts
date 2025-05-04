@@ -37,12 +37,15 @@ function regexSearch(
   text: string,
   pattern: RegExp,
   group = 1,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   def: any = null,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): any {
   const match = pattern.exec(text);
   return match ? match[group] : def;
 }
 
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 function* searchDict(partial: any, searchKey: string): Generator<any> {
   const stack = [partial];
   while (stack.length) {
@@ -76,11 +79,14 @@ async function fetchWithUserAgent(
 }
 
 async function ajaxRequest(
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   endpoint: any,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   ytcfg: any,
   retries = 5,
   sleep = 2000,
   timeout = 60000,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): Promise<any> {
   const url = `https://www.youtube.com${endpoint.commandMetadata.webCommandMetadata.apiUrl}`;
   const data = {
@@ -114,6 +120,7 @@ async function ajaxRequest(
 }
 
 // Helper to extract comments and next token from AJAX response
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 function processAjaxResponse(response: any): {
   comments: YoutubeComment[];
   nextContinuationToken: string | null;
@@ -162,6 +169,7 @@ function processAjaxResponse(response: any): {
   ];
 
   // Extract toolbar states for heart status lookup
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   const toolbarStates: Record<string, any> = {};
   for (const state of searchDict(
     response,
@@ -174,12 +182,16 @@ function processAjaxResponse(response: any): {
 
   for (const commentSource of commentSources) {
     let commentId: string | undefined;
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     let author: any = {};
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     let content: any = {};
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     let toolbar: any = {};
     let publishedTime: string | undefined;
     let toolbarStateKey: string | undefined;
     let isHearted = false;
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     let paidChip: any = null;
 
     if (commentSource.commentId) {
@@ -204,6 +216,7 @@ function processAjaxResponse(response: any): {
       paidChip = commentSource.properties.paidCommentChip;
 
       // Look up heart status using toolbarStateKey
+      // biome-ignore lint/style/noNonNullAssertion: <explanation>
       const state = toolbarStates[toolbarStateKey!];
       if (state?.heartState === "TOOLBAR_HEART_STATE_HEARTED") {
         isHearted = true;
@@ -217,6 +230,7 @@ function processAjaxResponse(response: any): {
     const result: YoutubeComment = {
       cid: commentId,
       text:
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
         content?.runs?.map((r: any) => r.text).join("") ||
         content?.content ||
         "", // Handle both structures
@@ -247,6 +261,7 @@ export async function getInitialCrawlData(
   videoId: string,
   sortBy: SortBy,
   language?: string,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): Promise<{ continuationToken: string | null; ytcfg: any }> {
   const youtubeUrl = YOUTUBE_VIDEO_URL + videoId;
   let res = await fetchWithUserAgent(youtubeUrl);
@@ -256,6 +271,7 @@ export async function getInitialCrawlData(
   if (res.url.includes("consent")) {
     const params: Record<string, string> = {};
     let match: RegExpExecArray | null;
+    // biome-ignore lint/suspicious/noAssignInExpressions: <explanation>
     while ((match = YT_HIDDEN_INPUT_RE.exec(html))) {
       params[match[1]] = match[2];
     }
@@ -289,6 +305,7 @@ export async function getInitialCrawlData(
   // Find the sort menu to get the correct initial continuation endpoint
   let sortMenu =
     ([...searchDict(data, "sortFilterSubMenuRenderer")][0]
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
       ?.subMenuItems as any[]) || [];
 
   // If sort menu not in initial data, try fetching via ajax (common case)
@@ -300,6 +317,7 @@ export async function getInitialCrawlData(
       data = await ajaxRequest(continuations[0], ytcfg);
       sortMenu =
         ([...searchDict(data, "sortFilterSubMenuRenderer")][0]
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
           ?.subMenuItems as any[]) || [];
     }
   }
@@ -359,6 +377,7 @@ export async function getInitialCrawlData(
  */
 export async function fetchCommentPageData(
   continuationToken: string,
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   ytcfg: any,
   sleep = 100,
 ): Promise<{
@@ -456,10 +475,14 @@ export async function* getCommentsFromUrl(
 
 // This function is now largely superseded by fetchCommentPageData but kept for reference/potential direct use
 export async function fetchCommentsByContinuation(
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   continuation: any, // Original function took the full endpoint object
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   ytcfg: any,
   sleep = 100,
   callback?: FetchCallback, // Keep callback for potential external use
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): Promise<{ comments: YoutubeComment[]; newContinuations: any[] }> {
   // Original return type included full continuation objects
 

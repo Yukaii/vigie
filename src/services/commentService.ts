@@ -17,11 +17,6 @@ export class CommentService {
 
   async upsertComment(comment: YoutubeComment, videoId: string): Promise<void> {
     const publishedAtIso: string | null = null;
-    try {
-      // publishedAtIso = this.parseRelativeDate(comment.time)?.toISOString();
-    } catch (e) {
-      console.warn(`Could not parse time string: ${comment.time}`);
-    }
 
     const commentData: Omit<CommentsRow, "first_seen_at" | "published_at"> & {
       published_at: string | null;
@@ -38,7 +33,7 @@ export class CommentService {
       author_photo_url: comment.photo,
       votes: Number.parseInt(comment.votes, 10) || 0,
       reply_count: comment.replies,
-      is_hearted: comment.heart,
+      is_hearted: !!comment.heart,
       is_paid: !!comment.paid,
       raw_time_string: comment.time,
       last_updated_at: new Date().toISOString(),

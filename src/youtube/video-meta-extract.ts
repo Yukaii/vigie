@@ -49,7 +49,8 @@ export async function fetchYoutubeVideoMeta(
       // Try to find channel info in initial data
       const owner =
         data?.contents?.twoColumnWatchNextResults?.results?.results?.contents?.find(
-          (c: any) => c.videoSecondaryInfoRenderer,
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+          (c: unknown) => (c as any).videoSecondaryInfoRenderer,
         )?.videoSecondaryInfoRenderer?.owner?.videoOwnerRenderer;
       if (owner) {
         channel_id = owner?.navigationEndpoint?.browseEndpoint?.browseId || "";
