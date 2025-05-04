@@ -9,7 +9,7 @@
     "@biomejs/biome": "1.9.4",
     "@cloudflare/vite-plugin": "1.1.0",
     "@hono/vite-build": "^1.6.0",
-    "@types/bun": "^1.2.10",
+    "@types/bun": "^1.2.11",
     "@types/jest": "^29.5.14",
     "@types/node": "^22.15.3",
     "@types/react": "^19.1.2",
@@ -35,6 +35,7 @@
     "fmt": "biome format --write ./src",
     "lint": "biome lint ./src",
     "lint:fix": "biome lint ./src --write  --unsafe",
-    "test": "jest"
+    "test": "jest",
+    "test:youtube": "bun run src/youtube/comment-tester.ts"
   }
 }
