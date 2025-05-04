@@ -1,25 +1,26 @@
-import { cloudflare } from '@cloudflare/vite-plugin'
-import build from '@hono/vite-build/cloudflare-workers'
-import { defineConfig } from 'vite'
-import ssrHotReload from 'vite-plugin-ssr-hot-reload'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { cloudflare } from "@cloudflare/vite-plugin";
+import path from "node:path"
 
-export default defineConfig(({ command, isSsrBuild }) => {
-  if (command === 'serve') {
-    return { plugins: [ssrHotReload(), cloudflare()] }
-  }
-  if (!isSsrBuild) {
-    return {
-      build: {
-        rollupOptions: {
-          input: ['./src/style.css'],
-          output: {
-            assetFileNames: 'assets/[name].[ext]'
-          }
-        }
-      }
+export default defineConfig({
+  plugins: [,
+    react(), cloudflare(),
+  ],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'frontend'),
+    },
+  },
+  define: {
+    // stub out a minimal process.stdout
+    'process.stdout': {
+      isTTY: false,
+      write: () => {},
+    },
+    'process.stderr': {
+      isTTY: false,
+      write: () => {},
     }
   }
-  return {
-    plugins: [build({ outputDir: 'dist-server' })]
-  }
-})
+});
