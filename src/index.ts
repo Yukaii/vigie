@@ -11,11 +11,10 @@ app.get("/api", (c: Context) => {
 });
 
 app.on(["GET", "PUT", "POST"], "/api/inngest", (c: Context, next: Next) => {
-  const { INNGEST_SIGNING_KEY } = env<{ INNGEST_SIGNING_KEY: string }>(c);
   return serve({
     client: inngest,
     functions,
-    signingKey: INNGEST_SIGNING_KEY,
+    signingKey: c.env.INNGEST_SIGNING_KEY,
   })(c);
 });
 
