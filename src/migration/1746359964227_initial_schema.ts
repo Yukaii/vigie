@@ -1,6 +1,7 @@
 import { type Kysely, sql, type Migration } from "kysely";
+import type { Database } from "../types";
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up(db: Kysely<Database>): Promise<void> {
   // Create ENUM types first as they might be used in table definitions
   await db.schema
     .createType("crawl_sort_by")
@@ -133,7 +134,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down(db: Kysely<Database>): Promise<void> {
   // Drop tables in reverse order of creation, considering dependencies
   await db.schema.dropTable("crawl_status").ifExists().execute();
   await db.schema.dropTable("comment_updates").ifExists().execute();

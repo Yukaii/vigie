@@ -1,8 +1,34 @@
-// Define interfaces for table rows (optional but recommended for type safety)
+/**
+ * Define interfaces for table rows (optional but recommended for type safety)
+ * Ensure these match your actual DB ENUM types
+ */
+
+export interface VideosRow {
+  video_id: string;
+  title: string | null;
+  channel_id: string | null;
+  channel_title: string | null;
+  first_fetched_at: string | null;
+  last_fetched_at: string | null;
+}
+
+export interface Database {
+  videos: VideosRow;
+  comments: CommentsRow;
+  comment_updates: CommentUpdatesRow;
+  crawl_status: CrawlStatusRow;
+}
+
 // Ensure these match your actual DB ENUM types
 export enum CrawlSortBy {
   POPULAR = "POPULAR",
   RECENT = "RECENT",
+}
+
+export interface YoutubeYtcfg {
+  INNERTUBE_CONTEXT: Record<string, unknown>;
+  INNERTUBE_API_KEY: string;
+  [key: string]: unknown;
 }
 
 /* CrawlStatusEnum removed: status is no longer orchestrated in DB */
@@ -17,7 +43,7 @@ export interface CrawlStatusRow {
   error_message: string | null;
   created_at: string;
   updated_at: string;
-  ytcfg: any | null;
+  ytcfg: YoutubeYtcfg | null;
 }
 
 export interface CommentsRow {

@@ -1,14 +1,10 @@
-import { Inngest, InngestMiddleware, Context, EventSchemas } from "inngest";
+import { Inngest, InngestMiddleware, EventSchemas } from "inngest";
 import type { Context as HonoContext } from "hono";
-import { CrawlSortBy, type CrawlStatusRow } from "./types";
+import { CrawlSortBy } from "./types";
+import type { CrawlStatusRow, YoutubeYtcfg } from "./types";
 import { CrawlStatusService } from "../services/crawlStatusService";
 import { CommentService } from "../services/commentService";
-import {
-  SortBy,
-  getInitialCrawlData,
-  fetchCommentPageData,
-  YoutubeComment,
-} from "../youtube/comment-downloader";
+import { SortBy, getInitialCrawlData, fetchCommentPageData } from "../youtube/comment-downloader";
 // --- End Comment Downloader Imports ---
 
 type Bindings = {
@@ -37,7 +33,7 @@ const bindings = new InngestMiddleware({
 });
 
 // Define Event Schemas
-type Events = {
+export type Events = {
   "youtube/comment.crawl.trigger": {
     data: {
       videoId: string;
@@ -51,6 +47,9 @@ type Events = {
     };
   };
 };
+
+import type { GetEvents } from "inngest";
+export type InngestEvents = GetEvents<typeof inngest>;
 
 // Create a client to send and receive events
 export const inngest = new Inngest({
@@ -66,10 +65,12 @@ interface EnvBindings {
   SUPABASE_ANON_KEY: string;
 }
 
+import type { GetFunctionInput } from "inngest";
+
 const triggerCommentCrawl = inngest.createFunction(
   { id: "trigger-youtube-comment-crawl", concurrency: 5 },
   { event: "youtube/comment.crawl.trigger" },
-  async (input: { event: any; step: any; logger: any; env: EnvBindings }) => {
+  async (input: GetFunctionInput<typeof inngest, "youtube/comment.crawl.trigger">) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
     const supabase = createSupabaseClient(
@@ -94,7 +95,7 @@ const triggerCommentCrawl = inngest.createFunction(
             videoId,
             sortByString,
           );
-        } catch (error) {
+        } catch (error: unknown) {
           logger.error("Error checking existing crawl via service", { error });
           throw error;
         }
@@ -112,7 +113,7 @@ const triggerCommentCrawl = inngest.createFunction(
     let crawlId: number;
     let initialContinuationToken: string | null = null;
     let needsInitialFetch = false;
-    let ytcfg: any = null;
+    let ytcfg: YoutubeYtcfg | null = null;
 
     if (!crawl) {
       logger.info(
@@ -124,7 +125,7 @@ const triggerCommentCrawl = inngest.createFunction(
             videoId,
             sortByString,
           );
-        } catch (error) {
+        } catch (error: unknown) {
           logger.error("Error creating crawl record via service", { error });
           throw error;
         }
@@ -182,12 +183,15 @@ const triggerCommentCrawl = inngest.createFunction(
           "update-crawl-with-initial-token-and-ytcfg",
           async () => {
             try {
+              if (initialContinuationToken == null) {
+                throw new Error("initialContinuationToken is null or undefined");
+              }
               await crawlStatusService.updateCrawlWithInitialToken(
                 crawlId,
-                initialContinuationToken!,
+                initialContinuationToken,
                 ytcfg,
               );
-            } catch (error) {
+            } catch (error: unknown) {
               logger.error(
                 "Error updating crawl with initial token via service",
                 { error },
@@ -196,8 +200,9 @@ const triggerCommentCrawl = inngest.createFunction(
             }
           },
         );
-      } catch (error: any) {
-        const errorMessage = `Initial fetch failed: ${error.message}`;
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         logger.error(
           `Failed to get initial data for crawl ${crawlId}: ${errorMessage}`,
           { error },
@@ -244,7 +249,7 @@ const triggerCommentCrawl = inngest.createFunction(
 const fetchCommentPage = inngest.createFunction(
   { id: "fetch-youtube-comment-page", concurrency: 10, retries: 5 },
   { event: "youtube/comment.page.fetch" },
-  async (input: { event: any; step: any; logger: any; env: EnvBindings }) => {
+  async (input: GetFunctionInput<typeof inngest, "youtube/comment.page.fetch">) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
     const supabase = createSupabaseClient(
@@ -263,9 +268,11 @@ const fetchCommentPage = inngest.createFunction(
       crawl = await step.run("get-crawl-details", async () => {
         return await crawlStatusService.getCrawlDetails(crawlId);
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       logger.error(
-        `Failed to get crawl details for ${crawlId}: ${error.message}`,
+        `Failed to get crawl details for ${crawlId}: ${errorMessage}`,
         { error },
       );
       throw error;
@@ -283,7 +290,7 @@ const fetchCommentPage = inngest.createFunction(
     }
 
     const currentToken = crawl.continuation_token;
-    const ytcfgForFetch = crawl.ytcfg;
+    const ytcfgForFetch: YoutubeYtcfg | null = crawl.ytcfg;
 
     if (!ytcfgForFetch) {
       logger.error(
@@ -296,7 +303,7 @@ const fetchCommentPage = inngest.createFunction(
     await step.run("set-crawl-in-progress", async () => {
       try {
         await crawlStatusService.setCrawlInProgress(crawlId);
-      } catch (error) {
+      } catch (error: unknown) {
         logger.error("Error setting crawl status to IN_PROGRESS via service", {
           error,
         });
@@ -339,7 +346,7 @@ const fetchCommentPage = inngest.createFunction(
               crawlId,
               nextContinuationToken,
             );
-          } catch (error) {
+          } catch (error: unknown) {
             logger.error(
               "Error updating crawl status for next page via service",
               { error },
@@ -363,7 +370,7 @@ const fetchCommentPage = inngest.createFunction(
       await step.run("mark-crawl-completed", async () => {
         try {
           await crawlStatusService.markCrawlCompleted(crawlId);
-        } catch (error) {
+        } catch (error: unknown) {
           logger.error("Error marking crawl as completed via service", {
             error,
           });
@@ -375,9 +382,11 @@ const fetchCommentPage = inngest.createFunction(
         nextPage: false,
         commentsProcessed: comments.length,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       const errorMessage =
-        error.message || "Unknown error during page fetch/process";
+        error instanceof Error
+          ? error.message
+          : "Unknown error during page fetch/process";
       logger.error(
         `Failed to fetch/process page for crawl ${crawlId}: ${errorMessage}`,
         { error },
