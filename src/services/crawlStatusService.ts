@@ -1,5 +1,5 @@
 import type { DbClient } from "../db";
-import type { CrawlSortBy, CrawlStatusRow } from "../inngest/types";
+import type { CrawlSortBy, CrawlStatusRow } from "../types";
 
 export class CrawlStatusService {
   private db: DbClient;

@@ -1,7 +1,6 @@
 import { Inngest, InngestMiddleware, EventSchemas } from "inngest";
 import type { Context as HonoContext } from "hono";
-import { CrawlSortBy } from "./types";
-import type { CrawlStatusRow, YoutubeYtcfg } from "./types";
+import { CrawlSortBy, type CrawlStatusRow, type YoutubeYtcfg } from "../types";
 import { CrawlStatusService } from "../services/crawlStatusService";
 import { CommentService } from "../services/commentService";
 import { SortBy, getInitialCrawlData, fetchCommentPageData } from "../youtube/comment-downloader";
