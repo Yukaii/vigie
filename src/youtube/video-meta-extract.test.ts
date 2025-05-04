@@ -15,14 +15,8 @@ describe("fetchYoutubeVideoMeta", () => {
     expect(meta.channel_title.length).toBeGreaterThan(0);
   });
 
-  it("returns empty fields for an invalid video", async () => {
+  it("throws an error for an invalid video", async () => {
     const videoId = "invalidid123";
-    const meta = await fetchYoutubeVideoMeta(videoId);
-
-    expect(meta.video_id).toBe(videoId);
-    // Title and channel info may be empty for invalid video
-    expect(typeof meta.title).toBe("string");
-    expect(typeof meta.channel_id).toBe("string");
-    expect(typeof meta.channel_title).toBe("string");
+    await expect(fetchYoutubeVideoMeta(videoId)).rejects.toThrow();
   });
 });

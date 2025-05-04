@@ -31,6 +31,11 @@ export async function fetchYoutubeVideoMeta(
 ): Promise<YoutubeVideoMeta> {
   const url = YOUTUBE_VIDEO_URL + videoId;
   const res = await fetchWithUserAgent(url);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch YouTube video page: ${res.status} ${res.statusText}`);
+  }
+
   const html = await res.text();
 
   // Extract title
@@ -59,6 +64,13 @@ export async function fetchYoutubeVideoMeta(
     } catch (e) {
       // ignore
     }
+  }
+
+  if (!title) {
+    throw new Error("Failed to extract video title from YouTube page.");
+  }
+  if (!channel_id || !channel_title) {
+    throw new Error("Failed to extract channel information from YouTube page.");
   }
 
   return {
