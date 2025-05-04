@@ -1,4 +1,4 @@
-import { supabase, DbClient } from '../db';
+import { DbClient } from '../db';
 import {
   CrawlSortBy,
   CrawlStatusEnum,
@@ -8,7 +8,7 @@ import {
 export class CrawlStatusService {
   private db: DbClient;
 
-  constructor(dbClient: DbClient = supabase) {
+  constructor(dbClient: DbClient) {
     this.db = dbClient;
   }
 
@@ -175,6 +175,3 @@ export class CrawlStatusService {
     }
   }
 }
-
-// Export a singleton instance
-export const crawlStatusService = new CrawlStatusService();

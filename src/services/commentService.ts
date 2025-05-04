@@ -1,11 +1,11 @@
-import { supabase, DbClient } from '../db';
+import { DbClient } from '../db';
 import { CommentsRow, CommentUpdatesRow } from '../inngest/types';
 import { YoutubeComment } from '../youtube/comment-downloader'; // Assuming YoutubeComment is exported
 
 export class CommentService {
   private db: DbClient;
 
-  constructor(dbClient: DbClient = supabase) {
+  constructor(dbClient: DbClient) {
     this.db = dbClient;
   }
 
@@ -127,6 +127,3 @@ export class CommentService {
     }
   }
 }
-
-// Export a singleton instance
-export const commentService = new CommentService();
