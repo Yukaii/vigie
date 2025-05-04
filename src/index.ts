@@ -15,8 +15,7 @@ app.on(
   serve({
     client: inngest,
     functions,
-  })
+  }),
 );
-
 
 export default app;

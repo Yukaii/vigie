@@ -1,17 +1,14 @@
 import { Inngest, InngestMiddleware, Context, EventSchemas } from "inngest";
 import type { Context as HonoContext } from "hono";
-import {
-  CrawlSortBy,
-  CrawlStatusRow,
-} from './types';
-import { CrawlStatusService } from '../services/crawlStatusService';
-import { CommentService } from '../services/commentService';
+import { CrawlSortBy, type CrawlStatusRow } from "./types";
+import { CrawlStatusService } from "../services/crawlStatusService";
+import { CommentService } from "../services/commentService";
 import {
   SortBy,
   getInitialCrawlData,
   fetchCommentPageData,
   YoutubeComment,
-} from '../youtube/comment-downloader';
+} from "../youtube/comment-downloader";
 // --- End Comment Downloader Imports ---
 
 type Bindings = {
@@ -75,22 +72,34 @@ const triggerCommentCrawl = inngest.createFunction(
   async (input: { event: any; step: any; logger: any; env: EnvBindings }) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
-    const supabase = createSupabaseClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+    const supabase = createSupabaseClient(
+      env.SUPABASE_URL,
+      env.SUPABASE_ANON_KEY,
+    );
     const crawlStatusService = new CrawlStatusService(supabase);
 
     const { videoId, sortBy } = event.data;
-    const sortByString = sortBy === SortBy.RECENT ? CrawlSortBy.RECENT : CrawlSortBy.POPULAR;
-    logger.info(`Triggering crawl for video ${videoId}, sort by ${sortByString}`);
+    const sortByString =
+      sortBy === SortBy.RECENT ? CrawlSortBy.RECENT : CrawlSortBy.POPULAR;
+    logger.info(
+      `Triggering crawl for video ${videoId}, sort by ${sortByString}`,
+    );
 
     // 1. Check existing crawl status using service
-    let crawl: CrawlStatusRow | null = await step.run("check-existing-crawl", async () => {
-      try {
-        return await crawlStatusService.findExistingCrawl(videoId, sortByString);
-      } catch (error) {
-        logger.error("Error checking existing crawl via service", { error });
-        throw error;
-      }
-    });
+    let crawl: CrawlStatusRow | null = await step.run(
+      "check-existing-crawl",
+      async () => {
+        try {
+          return await crawlStatusService.findExistingCrawl(
+            videoId,
+            sortByString,
+          );
+        } catch (error) {
+          logger.error("Error checking existing crawl via service", { error });
+          throw error;
+        }
+      },
+    );
 
     // --- New logic: Ensure video exists in videos table with metadata ---
     const { VideoService } = await import("../services/videoService");
@@ -106,10 +115,15 @@ const triggerCommentCrawl = inngest.createFunction(
     let ytcfg: any = null;
 
     if (!crawl) {
-      logger.info(`No existing crawl found for ${videoId} (${sortByString}). Creating new record.`);
+      logger.info(
+        `No existing crawl found for ${videoId} (${sortByString}). Creating new record.`,
+      );
       crawl = await step.run("create-crawl-record", async () => {
         try {
-          return await crawlStatusService.createCrawlRecord(videoId, sortByString);
+          return await crawlStatusService.createCrawlRecord(
+            videoId,
+            sortByString,
+          );
         } catch (error) {
           logger.error("Error creating crawl record via service", { error });
           throw error;
@@ -125,7 +139,9 @@ const triggerCommentCrawl = inngest.createFunction(
         throw new Error("Crawl record unexpectedly null after check.");
       }
       crawlId = crawl.crawl_id;
-      logger.info(`Existing crawl found (ID: ${crawlId}) for ${videoId} (${sortByString}).`);
+      logger.info(
+        `Existing crawl found (ID: ${crawlId}) for ${videoId} (${sortByString}).`,
+      );
       // No status orchestration: always proceed to fetch and update crawl_status as metadata only
       needsInitialFetch = true;
     }
@@ -133,34 +149,59 @@ const triggerCommentCrawl = inngest.createFunction(
     if (needsInitialFetch) {
       logger.info(`Performing initial data fetch for crawl ${crawlId}.`);
       try {
-        const initialData = await step.run("get-initial-crawl-data", async () => {
-          return await getInitialCrawlData(videoId, sortBy);
-        });
+        const initialData = await step.run(
+          "get-initial-crawl-data",
+          async () => {
+            return await getInitialCrawlData(videoId, sortBy);
+          },
+        );
 
         initialContinuationToken = initialData.continuationToken;
         ytcfg = initialData.ytcfg;
 
         if (!initialContinuationToken) {
-          logger.warn(`Initial fetch for crawl ${crawlId} returned no continuation token. Marking as complete.`);
-          await step.run("mark-crawl-as-completed-no-initial-token", async () => {
-            await crawlStatusService.markCrawlCompleteNoToken(crawlId);
-          });
-          return { status: "Completed", reason: "No initial continuation token" };
+          logger.warn(
+            `Initial fetch for crawl ${crawlId} returned no continuation token. Marking as complete.`,
+          );
+          await step.run(
+            "mark-crawl-as-completed-no-initial-token",
+            async () => {
+              await crawlStatusService.markCrawlCompleteNoToken(crawlId);
+            },
+          );
+          return {
+            status: "Completed",
+            reason: "No initial continuation token",
+          };
         }
 
-        logger.info(`Initial token and ytcfg obtained for crawl ${crawlId}. Updating record.`);
-        await step.run("update-crawl-with-initial-token-and-ytcfg", async () => {
-          try {
-            await crawlStatusService.updateCrawlWithInitialToken(crawlId, initialContinuationToken!, ytcfg);
-          } catch (error) {
-            logger.error("Error updating crawl with initial token via service", { error });
-            throw error;
-          }
-        });
-
+        logger.info(
+          `Initial token and ytcfg obtained for crawl ${crawlId}. Updating record.`,
+        );
+        await step.run(
+          "update-crawl-with-initial-token-and-ytcfg",
+          async () => {
+            try {
+              await crawlStatusService.updateCrawlWithInitialToken(
+                crawlId,
+                initialContinuationToken!,
+                ytcfg,
+              );
+            } catch (error) {
+              logger.error(
+                "Error updating crawl with initial token via service",
+                { error },
+              );
+              throw error;
+            }
+          },
+        );
       } catch (error: any) {
         const errorMessage = `Initial fetch failed: ${error.message}`;
-        logger.error(`Failed to get initial data for crawl ${crawlId}: ${errorMessage}`, { error });
+        logger.error(
+          `Failed to get initial data for crawl ${crawlId}: ${errorMessage}`,
+          { error },
+        );
         await step.run("mark-crawl-as-failed-initial", async () => {
           await crawlStatusService.markCrawlFailed(crawlId, errorMessage);
         });
@@ -171,25 +212,33 @@ const triggerCommentCrawl = inngest.createFunction(
       ytcfg = crawl.ytcfg;
       logger.info(`Resuming crawl ${crawlId} with existing token and ytcfg.`);
       if (!ytcfg) {
-        logger.warn(`Resuming crawl ${crawlId} but ytcfg is missing from the database record.`);
+        logger.warn(
+          `Resuming crawl ${crawlId} but ytcfg is missing from the database record.`,
+        );
       }
     }
 
     if (initialContinuationToken) {
-      logger.info(`Sending event to fetch first/next page for crawl ${crawlId}.`);
+      logger.info(
+        `Sending event to fetch first/next page for crawl ${crawlId}.`,
+      );
       await step.sendEvent("send-fetch-page-event", {
         name: "youtube/comment.page.fetch",
         data: { crawlId },
       });
       return { status: "Triggered", crawlId };
-    } else {
-      logger.warn(`Crawl ${crawlId} has no continuation token to proceed. Marking as complete.`);
-      await step.run("mark-crawl-as-completed-no-token-final", async () => {
-        await crawlStatusService.markCrawlCompleteNoToken(crawlId);
-      });
-      return { status: "Completed", reason: "No continuation token found to initiate fetch" };
     }
-  }
+    logger.warn(
+      `Crawl ${crawlId} has no continuation token to proceed. Marking as complete.`,
+    );
+    await step.run("mark-crawl-as-completed-no-token-final", async () => {
+      await crawlStatusService.markCrawlCompleteNoToken(crawlId);
+    });
+    return {
+      status: "Completed",
+      reason: "No continuation token found to initiate fetch",
+    };
+  },
 );
 
 const fetchCommentPage = inngest.createFunction(
@@ -198,7 +247,10 @@ const fetchCommentPage = inngest.createFunction(
   async (input: { event: any; step: any; logger: any; env: EnvBindings }) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
-    const supabase = createSupabaseClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY);
+    const supabase = createSupabaseClient(
+      env.SUPABASE_URL,
+      env.SUPABASE_ANON_KEY,
+    );
     const crawlStatusService = new CrawlStatusService(supabase);
     const commentService = new CommentService(supabase);
 
@@ -212,13 +264,18 @@ const fetchCommentPage = inngest.createFunction(
         return await crawlStatusService.getCrawlDetails(crawlId);
       });
     } catch (error: any) {
-      logger.error(`Failed to get crawl details for ${crawlId}: ${error.message}`, { error });
+      logger.error(
+        `Failed to get crawl details for ${crawlId}: ${error.message}`,
+        { error },
+      );
       throw error;
     }
 
     // Validate crawl state (status removed, only check for continuation_token)
     if (!crawl.continuation_token) {
-      logger.warn(`Crawl ${crawlId} has no continuation token. Marking complete.`);
+      logger.warn(
+        `Crawl ${crawlId} has no continuation token. Marking complete.`,
+      );
       await step.run("mark-crawl-completed-no-token-fetch", async () => {
         await crawlStatusService.markCrawlCompleteNoToken(crawlId);
       });
@@ -229,7 +286,9 @@ const fetchCommentPage = inngest.createFunction(
     const ytcfgForFetch = crawl.ytcfg;
 
     if (!ytcfgForFetch) {
-      logger.error(`Cannot proceed with fetch for crawl ${crawlId}: ytcfg is missing from database record.`);
+      logger.error(
+        `Cannot proceed with fetch for crawl ${crawlId}: ytcfg is missing from database record.`,
+      );
       throw new Error(`ytcfg is missing for crawl ${crawlId}`);
     }
 
@@ -238,37 +297,53 @@ const fetchCommentPage = inngest.createFunction(
       try {
         await crawlStatusService.setCrawlInProgress(crawlId);
       } catch (error) {
-        logger.error("Error setting crawl status to IN_PROGRESS via service", { error });
+        logger.error("Error setting crawl status to IN_PROGRESS via service", {
+          error,
+        });
         throw error;
       }
     });
 
     try {
       // 3. Fetch comment page data
-      logger.info(`Calling fetchCommentPageData for crawl ${crawlId} with token.`);
+      logger.info(
+        `Calling fetchCommentPageData for crawl ${crawlId} with token.`,
+      );
       const pageData = await step.run("fetch-comment-page-data", async () => {
         return await fetchCommentPageData(currentToken, ytcfgForFetch);
       });
 
       const { comments, nextContinuationToken } = pageData;
-      logger.info(`Fetched ${comments.length} comments for crawl ${crawlId}. Next token: ${nextContinuationToken ? 'Yes' : 'No'}.`);
+      logger.info(
+        `Fetched ${comments.length} comments for crawl ${crawlId}. Next token: ${nextContinuationToken ? "Yes" : "No"}.`,
+      );
 
       // 4. Process comments using service
       if (comments.length > 0) {
         await step.run("process-comments-batch", async () => {
-          logger.debug(`Processing ${comments.length} comments for crawl ${crawlId}.`);
+          logger.debug(
+            `Processing ${comments.length} comments for crawl ${crawlId}.`,
+          );
           await commentService.processCommentBatch(comments, crawl.video_id);
         });
       }
 
       // 5. Update crawl status based on outcome using service
       if (nextContinuationToken) {
-        logger.info(`Updating crawl ${crawlId} status to PENDING for next page.`);
+        logger.info(
+          `Updating crawl ${crawlId} status to PENDING for next page.`,
+        );
         await step.run("update-crawl-next-page", async () => {
           try {
-            await crawlStatusService.updateCrawlNextPage(crawlId, nextContinuationToken);
+            await crawlStatusService.updateCrawlNextPage(
+              crawlId,
+              nextContinuationToken,
+            );
           } catch (error) {
-            logger.error("Error updating crawl status for next page via service", { error });
+            logger.error(
+              "Error updating crawl status for next page via service",
+              { error },
+            );
             throw error;
           }
         });
@@ -278,29 +353,41 @@ const fetchCommentPage = inngest.createFunction(
           name: "youtube/comment.page.fetch",
           data: { crawlId },
         });
-        return { status: "Page Processed", nextPage: true, commentsProcessed: comments.length };
-      } else {
-        logger.info(`Crawl ${crawlId} completed. No next continuation token.`);
-        await step.run("mark-crawl-completed", async () => {
-          try {
-            await crawlStatusService.markCrawlCompleted(crawlId);
-          } catch (error) {
-            logger.error("Error marking crawl as completed via service", { error });
-            throw error;
-          }
-        });
-        return { status: "Completed", nextPage: false, commentsProcessed: comments.length };
+        return {
+          status: "Page Processed",
+          nextPage: true,
+          commentsProcessed: comments.length,
+        };
       }
-
+      logger.info(`Crawl ${crawlId} completed. No next continuation token.`);
+      await step.run("mark-crawl-completed", async () => {
+        try {
+          await crawlStatusService.markCrawlCompleted(crawlId);
+        } catch (error) {
+          logger.error("Error marking crawl as completed via service", {
+            error,
+          });
+          throw error;
+        }
+      });
+      return {
+        status: "Completed",
+        nextPage: false,
+        commentsProcessed: comments.length,
+      };
     } catch (error: any) {
-      const errorMessage = error.message || 'Unknown error during page fetch/process';
-      logger.error(`Failed to fetch/process page for crawl ${crawlId}: ${errorMessage}`, { error });
+      const errorMessage =
+        error.message || "Unknown error during page fetch/process";
+      logger.error(
+        `Failed to fetch/process page for crawl ${crawlId}: ${errorMessage}`,
+        { error },
+      );
       await step.run("mark-crawl-failed", async () => {
         await crawlStatusService.markCrawlFailed(crawlId, errorMessage);
       });
       throw error;
     }
-  }
+  },
 );
 
 // Export the functions
