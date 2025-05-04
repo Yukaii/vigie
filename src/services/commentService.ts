@@ -1,5 +1,5 @@
 import type { DbClient } from "../db";
-import type { CommentsRow, CommentUpdatesRow } from "../inngest/types";
+import type { CommentsRow, CommentUpdatesRow } from "../types";
 import type { YoutubeComment } from "../youtube/comment-downloader"; // Assuming YoutubeComment is exported
 
 export class CommentService {
