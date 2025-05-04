@@ -1,6 +1,6 @@
 // Jest test suite for YouTube Comment Downloader
 
-import { getCommentsFromUrl, getComments, SortBy, YoutubeComment } from './comment-downloader';
+import { getCommentsFromUrl, getComments, fetchCommentsByContinuation, SortBy, YoutubeComment } from './comment-downloader';
 
 const sampleHtml = `
 <script>
@@ -90,6 +90,32 @@ test('should yield comments from getCommentsFromUrl', async () => {
     heart: false,
     reply: false,
   });
+});
+
+test('fetchCommentsByContinuation returns comments and continuations', async () => {
+  // Simulate a continuation and ytcfg as would be passed in real usage
+  const continuation = {
+    commandMetadata: { webCommandMetadata: { apiUrl: '/youtubei/v1/next' } },
+    continuationCommand: { token: 'token1' },
+  };
+  const ytcfg = {
+    INNERTUBE_CONTEXT: { client: { hl: 'en' } },
+    INNERTUBE_API_KEY: 'test-api-key',
+  };
+  const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, 0);
+  expect(comments.length).toBe(1);
+  expect(comments[0]).toMatchObject({
+    cid: 'cid123',
+    text: 'Test comment',
+    author: 'Test Author',
+    channel: 'channel123',
+    votes: '5',
+    replies: 2,
+    photo: 'http://photo.url',
+    heart: false,
+    reply: false,
+  });
+  expect(Array.isArray(newContinuations)).toBe(true);
 });
 
 test('should yield comments from getComments', async () => {

@@ -168,62 +168,77 @@ export async function* getCommentsFromUrl(
 
   while (continuations.length) {
     const continuation = continuations.pop();
-    const response = await ajaxRequest(continuation, ytcfg);
-    if (!response) break;
+    const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, sleep);
+    for (const c of comments) {
+      yield c;
+    }
+    continuations.push(...newContinuations);
+  }
+}
 
-    const error = [...searchDict(response, 'externalErrorMessage')][0];
-    if (error) throw new Error('Error returned from server: ' + error);
+export async function fetchCommentsByContinuation(
+  continuation: any,
+  ytcfg: any,
+  sleep = 100
+): Promise<{ comments: YoutubeComment[]; newContinuations: any[] }> {
+  const response = await ajaxRequest(continuation, ytcfg);
+  if (!response) return { comments: [], newContinuations: [] };
 
-    const actions = [
-      ...searchDict(response, 'reloadContinuationItemsCommand'),
-      ...searchDict(response, 'appendContinuationItemsAction'),
-    ];
-    for (const action of actions) {
-      for (const item of action.continuationItems || []) {
-        if (
-          ['comments-section', 'engagement-panel-comments-section', 'shorts-engagement-panel-comments-section'].includes(
-            action.targetId
-          )
-        ) {
-          continuations.unshift(...[...searchDict(item, 'continuationEndpoint')]);
-        }
-        if (
-          action.targetId?.startsWith('comment-replies-item') &&
-          item.continuationItemRenderer
-        ) {
-          continuations.push(
-            [...searchDict(item, 'buttonRenderer')][0]?.command
-          );
-        }
+  const error = [...searchDict(response, 'externalErrorMessage')][0];
+  if (error) throw new Error('Error returned from server: ' + error);
+
+  const newContinuations: any[] = [];
+  const actions = [
+    ...searchDict(response, 'reloadContinuationItemsCommand'),
+    ...searchDict(response, 'appendContinuationItemsAction'),
+  ];
+  for (const action of actions) {
+    for (const item of action.continuationItems || []) {
+      if (
+        ['comments-section', 'engagement-panel-comments-section', 'shorts-engagement-panel-comments-section'].includes(
+          action.targetId
+        )
+      ) {
+        newContinuations.unshift(...[...searchDict(item, 'continuationEndpoint')]);
+      }
+      if (
+        action.targetId?.startsWith('comment-replies-item') &&
+        item.continuationItemRenderer
+      ) {
+        newContinuations.push(
+          [...searchDict(item, 'buttonRenderer')][0]?.command
+        );
       }
     }
-
-    for (const comment of [...searchDict(response, 'commentEntityPayload')].reverse()) {
-      const properties = comment.properties;
-      const cid = properties.commentId;
-      const author = comment.author;
-      const toolbar = comment.toolbar;
-      const toolbarState = (
-        [...searchDict(response, 'engagementToolbarStateEntityPayload')].find(
-          (p: any) => p.key === properties.toolbarStateKey
-        ) || {}
-      );
-      const result: YoutubeComment = {
-        cid,
-        text: properties.content.content,
-        time: properties.publishedTime,
-        author: author.displayName,
-        channel: author.channelId,
-        votes: toolbar.likeCountNotliked?.trim() || '0',
-        replies: toolbar.replyCount,
-        photo: author.avatarThumbnailUrl,
-        heart: toolbarState.heartState === 'TOOLBAR_HEART_STATE_HEARTED',
-        reply: cid.includes('.'),
-      };
-      yield result;
-    }
-    await new Promise((resolve) => setTimeout(resolve, sleep));
   }
+
+  const comments: YoutubeComment[] = [];
+  for (const comment of [...searchDict(response, 'commentEntityPayload')].reverse()) {
+    const properties = comment.properties;
+    const cid = properties.commentId;
+    const author = comment.author;
+    const toolbar = comment.toolbar;
+    const toolbarState = (
+      [...searchDict(response, 'engagementToolbarStateEntityPayload')].find(
+        (p: any) => p.key === properties.toolbarStateKey
+      ) || {}
+    );
+    const result: YoutubeComment = {
+      cid,
+      text: properties.content.content,
+      time: properties.publishedTime,
+      author: author.displayName,
+      channel: author.channelId,
+      votes: toolbar.likeCountNotliked?.trim() || '0',
+      replies: toolbar.replyCount,
+      photo: author.avatarThumbnailUrl,
+      heart: toolbarState.heartState === 'TOOLBAR_HEART_STATE_HEARTED',
+      reply: cid.includes('.'),
+    };
+    comments.push(result);
+  }
+  await new Promise((resolve) => setTimeout(resolve, sleep));
+  return { comments, newContinuations };
 }
 
 export async function* getComments(
