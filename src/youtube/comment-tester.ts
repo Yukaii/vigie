@@ -14,7 +14,6 @@ async function main() {
     for await (const comment of getCommentsFromUrl(url)) {
       count++;
       console.log(`[${count}] (${comment.cid}) ${comment.author}: ${comment.text}`);
-      if (count >= 10) break; // Limit output for demo
     }
     if (count === 0) {
       console.log("No comments found or comments are disabled.");
