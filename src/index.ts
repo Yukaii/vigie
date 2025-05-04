@@ -12,10 +12,11 @@ app.get("/api", (c: Context) => {
 app.on(
   ["GET", "PUT", "POST"],
   "/api/inngest",
-  serve({
+  (c: Context, next: Next) => serve({
     client: inngest,
     functions,
-  }),
+    signingKey: c.env.INNGEST_SIGNING_KEY,
+  })(c)
 );
 
 export default app;
