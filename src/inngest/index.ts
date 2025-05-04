@@ -1,32 +1,17 @@
 import { Inngest, Context, EventSchemas } from "inngest";
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   CrawlSortBy,
   CrawlStatusEnum,
   CrawlStatusRow,
-  CommentsRow,
-  CommentUpdatesRow,
-} from './types'; // Import types from the new file
-
-// --- Database Setup ---
-// Ensure SUPABASE_URL and SUPABASE_ANON_KEY are set in your environment
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error("Supabase URL and Anon Key must be provided in environment variables.");
-}
-
-const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
-// --- End Database Setup ---
-
-// --- Comment Downloader Imports (Requires Refactoring) ---
+} from './types'; // Only need crawl types here now
+import { crawlStatusService } from '../services/crawlStatusService'; // Import crawl status service
+import { commentService } from '../services/commentService'; // Import comment service
 import {
-  SortBy, // Assuming SortBy enum exists in comment-downloader
-  getInitialCrawlData, // Gets ytcfg, first continuation -> { continuationToken: string | null, ytcfg: any }
-  fetchCommentPageData, // Fetches single page -> { comments: YoutubeComment[], nextContinuationToken: string | null }
-  YoutubeComment, // Assuming YoutubeComment type exists in comment-downloader
-} from '../youtube/comment-downloader'; // Adjust path as needed
+  SortBy,
+  getInitialCrawlData,
+  fetchCommentPageData,
+  YoutubeComment,
+} from '../youtube/comment-downloader';
 // --- End Comment Downloader Imports ---
 
 // Define Event Schemas
@@ -62,49 +47,32 @@ const triggerCommentCrawl = inngest.createFunction(
     const sortByString = sortBy === SortBy.RECENT ? CrawlSortBy.RECENT : CrawlSortBy.POPULAR;
     logger.info(`Triggering crawl for video ${videoId}, sort by ${sortByString}`);
 
-    // 1. Check existing crawl status in Supabase
+    // 1. Check existing crawl status using service
     let crawl: CrawlStatusRow | null = await step.run("check-existing-crawl", async () => {
-        const { data, error } = await supabase
-          .from('crawl_status')
-          .select('*')
-          .eq('video_id', videoId)
-          .eq('sort_by', sortByString)
-          .maybeSingle(); // Use maybeSingle to return null if not found
-
-        if (error) {
-          logger.error("Error checking existing crawl", { error });
-          throw error; // Throw to let Inngest handle retry
+        try {
+            return await crawlStatusService.findExistingCrawl(videoId, sortByString);
+        } catch (error) {
+            logger.error("Error checking existing crawl via service", { error });
+            throw error; // Throw to let Inngest handle retry
         }
-        return data;
-      });
+    });
 
-    let crawlId: number | undefined;
+    let crawlId: number; // Should always be defined after check/create
     let initialContinuationToken: string | null = null;
     let needsInitialFetch = false;
     let ytcfg: any = null; // To store ytcfg if needed across steps
 
     if (!crawl) {
       logger.info(`No existing crawl found for ${videoId} (${sortByString}). Creating new record.`);
-      // 2a. Create new crawl record in Supabase
-      const { data: newCrawlData, error: insertError } = await step.run("create-crawl-record", async () => {
-        return await supabase
-          .from('crawl_status')
-          .insert({
-            video_id: videoId,
-            sort_by: sortByString,
-            status: CrawlStatusEnum.PENDING,
-            ytcfg: null, // Initialize ytcfg as null
-            // created_at, updated_at are handled by DB defaults/triggers
-          })
-          .select() // Select the newly inserted row
-          .single(); // Expect a single row back
+      // 2a. Create new crawl record using service
+      crawl = await step.run("create-crawl-record", async () => {
+          try {
+              return await crawlStatusService.createCrawlRecord(videoId, sortByString);
+          } catch (error) {
+              logger.error("Error creating crawl record via service", { error });
+              throw error;
+          }
       });
-
-      if (insertError || !newCrawlData) {
-        logger.error("Error creating crawl record", { error: insertError });
-        throw insertError || new Error("Failed to create crawl record and get result.");
-      }
-      crawl = newCrawlData as CrawlStatusRow; // Assign the newly created crawl data
       crawlId = crawl.crawl_id;
       needsInitialFetch = true;
     } else {
@@ -114,17 +82,14 @@ const triggerCommentCrawl = inngest.createFunction(
         if (crawl.status === CrawlStatusEnum.COMPLETED || crawl.status === CrawlStatusEnum.FAILED) {
             // Simple restart logic: always restart completed/failed crawls when triggered
             logger.info(`Restarting ${crawl.status} crawl (ID: ${crawlId}).`);
-            const { error: updateError } = await step.run("update-crawl-status-to-pending", async () => {
-                return await supabase
-                  .from('crawl_status')
-                  // Clear token and ytcfg on restart
-                  .update({ status: CrawlStatusEnum.PENDING, continuation_token: null, ytcfg: null, error_message: null, updated_at: new Date().toISOString() })
-                  .eq('crawl_id', crawlId);
+            await step.run("restart-crawl", async () => {
+                try {
+                    await crawlStatusService.restartCrawl(crawlId);
+                } catch (error) {
+                    logger.error("Error restarting crawl via service", { error });
+                    throw error;
+                }
             });
-            if (updateError) {
-                logger.error("Error updating crawl status to PENDING", { error: updateError });
-                throw updateError;
-            }
             needsInitialFetch = true; // Need to get the *first* page token again
         } else if (crawl.status === CrawlStatusEnum.IN_PROGRESS || crawl.status === CrawlStatusEnum.PENDING) {
             // Already running or queued, log and exit
@@ -148,44 +113,33 @@ const triggerCommentCrawl = inngest.createFunction(
 
             if (!initialContinuationToken) {
                 logger.warn(`Initial fetch for crawl ${crawlId} returned no continuation token. Marking as complete.`);
-                 const { error: updateError } = await step.run("mark-crawl-as-completed-no-initial-token", async () => {
-                    return await supabase
-                      .from('crawl_status')
-                      .update({ status: CrawlStatusEnum.COMPLETED, updated_at: new Date().toISOString() })
-                      .eq('crawl_id', crawlId);
+                await step.run("mark-crawl-as-completed-no-initial-token", async () => {
+                    // No need to log error here, service handles it
+                    await crawlStatusService.markCrawlCompleteNoToken(crawlId);
                 });
-                 if (updateError) logger.error("Error marking crawl as completed (no initial token)", { error: updateError });
                 return { status: "Completed", reason: "No initial continuation token" };
             }
 
             logger.info(`Initial token and ytcfg obtained for crawl ${crawlId}. Updating record.`);
-            // Store initial token and ytcfg
-            const { error: updateTokenError } = await step.run("update-crawl-with-initial-token-and-ytcfg", async () => {
-                return await supabase
-                  .from('crawl_status')
-                  .update({
-                      continuation_token: initialContinuationToken,
-                      ytcfg: ytcfg, // Store the fetched ytcfg
-                      updated_at: new Date().toISOString()
-                    })
-                  .eq('crawl_id', crawlId);
+            // Store initial token and ytcfg using service
+            await step.run("update-crawl-with-initial-token-and-ytcfg", async () => {
+                try {
+                    await crawlStatusService.updateCrawlWithInitialToken(crawlId, initialContinuationToken!, ytcfg);
+                } catch (error) {
+                    logger.error("Error updating crawl with initial token via service", { error });
+                    throw error;
+                }
             });
-            if (updateTokenError) {
-                logger.error("Error updating crawl with initial token", { error: updateTokenError });
-                throw updateTokenError;
-            }
 
         } catch (error: any) {
-            logger.error(`Failed to get initial data for crawl ${crawlId}: ${error.message}`, { error });
-            const { error: failError } = await step.run("mark-crawl-as-failed-initial", async () => {
-                return await supabase
-                  .from('crawl_status')
-                  .update({ status: CrawlStatusEnum.FAILED, error_message: `Initial fetch failed: ${error.message}`, updated_at: new Date().toISOString() })
-                  .eq('crawl_id', crawlId);
+            const errorMessage = `Initial fetch failed: ${error.message}`;
+            logger.error(`Failed to get initial data for crawl ${crawlId}: ${errorMessage}`, { error });
+            await step.run("mark-crawl-as-failed-initial", async () => {
+                // Service handles logging internal errors
+                await crawlStatusService.markCrawlFailed(crawlId, errorMessage);
             });
-            if (failError) logger.error("Error marking crawl as failed after initial fetch error", { error: failError });
             // Do not throw here, just mark as failed and return
-            return { status: "Failed", reason: "Initial data fetch error" };
+            return { status: "Failed", reason: errorMessage };
         }
     } else {
         // Use existing token and ytcfg if resuming a PENDING crawl that wasn't COMPLETED/FAILED
@@ -213,13 +167,10 @@ const triggerCommentCrawl = inngest.createFunction(
         // This case should ideally be handled above (e.g., no initial token found)
         // Or if resuming a crawl that somehow lost its token
         logger.warn(`Crawl ${crawlId} has no continuation token to proceed. Marking as complete.`);
-         const { error: updateError } = await step.run("mark-crawl-as-completed-no-token-final", async () => {
-                return await supabase
-                  .from('crawl_status')
-                  .update({ status: CrawlStatusEnum.COMPLETED, updated_at: new Date().toISOString() })
-                  .eq('crawl_id', crawlId);
-            });
-        if (updateError) logger.error("Error marking crawl as completed (no token final)", { error: updateError });
+        await step.run("mark-crawl-as-completed-no-token-final", async () => {
+            // Service handles logging internal errors
+            await crawlStatusService.markCrawlCompleteNoToken(crawlId);
+        });
         return { status: "Completed", reason: "No continuation token found to initiate fetch" };
     }
   }
@@ -233,41 +184,31 @@ const fetchCommentPage = inngest.createFunction(
     const { crawlId } = event.data;
     logger.info(`Fetching comment page for crawl ${crawlId}.`);
 
-    // 1. Get current crawl status and token from Supabase
-    const crawl: CrawlStatusRow | null = await step.run("get-crawl-details", async () => {
-        const { data, error } = await supabase
-          .from('crawl_status')
-          .select('*')
-          .eq('crawl_id', crawlId)
-          .single(); // Use single as we expect it to exist at this point
-
-        if (error) {
-          logger.error(`Error fetching crawl details for ${crawlId}`, { error });
-          // If error is PgrstError with code 'PGRST116' (Not Found), handle specifically?
-          throw error;
-        }
-        return data;
-    });
+    // 1. Get current crawl status and token using service
+    let crawl: CrawlStatusRow;
+    try {
+        crawl = await step.run("get-crawl-details", async () => {
+            return await crawlStatusService.getCrawlDetails(crawlId);
+        });
+    } catch (error: any) {
+        // Handle case where crawl is not found specifically? Service throws currently.
+        logger.error(`Failed to get crawl details for ${crawlId}: ${error.message}`, { error });
+        // If it's a "not found" error, maybe return Aborted? Otherwise, rethrow for retry.
+        // For now, rethrow all errors from service.
+        throw error;
+    }
 
     // Validate crawl state
-    if (!crawl) {
-        // Should have been caught by the single() error, but double-check
-        logger.error(`Crawl record ${crawlId} not found. Aborting fetch.`);
-        return { status: "Aborted", reason: "Crawl record not found" };
-    }
     if (crawl.status !== CrawlStatusEnum.PENDING && crawl.status !== CrawlStatusEnum.IN_PROGRESS) { // Allow retry if IN_PROGRESS
       logger.warn(`Skipping fetch for crawl ${crawlId}. Status is ${crawl.status}.`);
       return { status: "Skipped", reason: `Invalid status: ${crawl.status}` };
     }
      if (!crawl.continuation_token) {
         logger.warn(`Crawl ${crawlId} is ${crawl.status} but has no continuation token. Marking complete.`);
-        const { error: updateError } = await step.run("mark-crawl-completed-no-token-fetch", async () => {
-            return await supabase
-              .from('crawl_status')
-              .update({ status: CrawlStatusEnum.COMPLETED, updated_at: new Date().toISOString() })
-              .eq('crawl_id', crawlId);
+        await step.run("mark-crawl-completed-no-token-fetch", async () => {
+            // Service handles logging internal errors
+            await crawlStatusService.markCrawlCompleteNoToken(crawlId);
         });
-        if (updateError) logger.error("Error marking crawl as completed (no token fetch)", { error: updateError });
         return { status: "Completed", reason: "No continuation token" };
     }
 
@@ -285,17 +226,15 @@ const fetchCommentPage = inngest.createFunction(
         // logger.warn(`Proceeding with fetch for crawl ${crawlId} without ytcfg.`);
     }
 
-    // 2. Update status to IN_PROGRESS
-    const { error: progressUpdateError } = await step.run("set-crawl-in-progress", async () => {
-        return await supabase
-          .from('crawl_status')
-          .update({ status: CrawlStatusEnum.IN_PROGRESS, last_attempted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('crawl_id', crawlId);
+    // 2. Update status to IN_PROGRESS using service
+    await step.run("set-crawl-in-progress", async () => {
+        try {
+            await crawlStatusService.setCrawlInProgress(crawlId);
+        } catch (error) {
+            logger.error("Error setting crawl status to IN_PROGRESS via service", { error });
+            throw error;
+        }
     });
-    if (progressUpdateError) {
-        logger.error("Error setting crawl status to IN_PROGRESS", { error: progressUpdateError });
-        throw progressUpdateError;
-    }
 
     try {
       // 3. Fetch comment page data
@@ -310,125 +249,28 @@ const fetchCommentPage = inngest.createFunction(
       const { comments, nextContinuationToken } = pageData;
       logger.info(`Fetched ${comments.length} comments for crawl ${crawlId}. Next token: ${nextContinuationToken ? 'Yes' : 'No'}.`);
 
-      // 4. Process comments (Sequentially, not transactional in Supabase JS client)
+      // 4. Process comments using service
       if (comments.length > 0) {
-          await step.run("process-comments", async () => {
+          await step.run("process-comments-batch", async () => {
               logger.debug(`Processing ${comments.length} comments for crawl ${crawlId}.`);
-              for (const comment of comments) {
-                  // Prepare data for insertion/update
-                  let publishedAtIso: string | null = null;
-                  try {
-                      // TODO: Implement robust date parsing for comment.time
-                      // publishedAtIso = parseRelativeDate(comment.time)?.toISOString();
-                  } catch (e) { logger.warn(`Could not parse time string: ${comment.time}`); }
+              // The service handles individual comment errors internally for now
+              await commentService.processCommentBatch(comments, crawl.video_id);
+              // If processCommentBatch threw an error, it would fail the step here.
+          });
+      }
 
-                  const commentData: Omit<CommentsRow, 'first_seen_at' | 'published_at'> & { published_at: string | null } = {
-                      comment_id: comment.cid, // Set primary key for upsert
-                      video_id: crawl.video_id,
-                      parent_comment_id: comment.reply ? comment.cid.substring(0, comment.cid.lastIndexOf('.')) : null,
-                      text: comment.text,
-                      published_at: publishedAtIso,
-                      author_display_name: comment.author,
-                      author_channel_id: comment.channel,
-                      author_photo_url: comment.photo,
-                      votes: parseInt(comment.votes, 10) || 0,
-                      reply_count: comment.replies,
-                      is_hearted: comment.heart,
-                      is_paid: !!comment.paid,
-                      raw_time_string: comment.time,
-                      last_updated_at: new Date().toISOString(),
-                  };
-
-                  // --- Upsert Logic using Supabase ---
-                  // 1. Try to fetch existing
-                  const { data: existing, error: fetchError } = await supabase
-                      .from('comments')
-                      .select('text, votes, reply_count, is_hearted') // Select fields for comparison
-                      .eq('comment_id', comment.cid)
-                      .maybeSingle();
-
-                  if (fetchError) {
-                      logger.error(`Error fetching existing comment ${comment.cid}`, { error: fetchError });
-                      throw fetchError; // Fail the step on DB error
-                  }
-
-                  if (existing) {
-                      // 2a. Update if exists and changed
-                      const updates: Partial<CommentsRow> = {};
-                      const changes: CommentUpdatesRow[] = [];
-
-                      if (existing.text !== commentData.text) {
-                          updates.text = commentData.text;
-                          changes.push({ comment_id: comment.cid, attribute_name: 'text', old_value: existing.text, new_value: commentData.text });
-                      }
-                      if (existing.votes !== commentData.votes) {
-                          updates.votes = commentData.votes;
-                          changes.push({ comment_id: comment.cid, attribute_name: 'votes', old_value: String(existing.votes), new_value: String(commentData.votes) });
-                      }
-                      // Add other fields: reply_count, is_hearted etc.
-
-                      if (Object.keys(updates).length > 0) {
-                          logger.debug(`Updating comment ${comment.cid}`);
-                          updates.last_updated_at = new Date().toISOString(); // Ensure update timestamp is set
-                          const { error: updateError } = await supabase
-                              .from('comments')
-                              .update(updates)
-                              .eq('comment_id', comment.cid);
-
-                          if (updateError) {
-                              logger.error(`Error updating comment ${comment.cid}`, { error: updateError });
-                              throw updateError;
-                          }
-
-                          // Insert into comment_updates (fire and forget errors for this for now?)
-                          const { error: updateLogError } = await supabase
-                              .from('comment_updates')
-                              .insert(changes);
-                          if (updateLogError) {
-                              logger.warn(`Error inserting comment_updates for ${comment.cid}`, { error: updateLogError });
-                              // Decide if this should be a fatal error for the step
-                          }
-                      }
-                  } else {
-                      // 2b. Insert if not exists
-                      logger.debug(`Inserting new comment ${comment.cid}`);
-                      const { error: insertError } = await supabase
-                          .from('comments')
-                          .insert({
-                              ...commentData,
-                              first_seen_at: new Date().toISOString(), // Set first_seen_at only on insert
-                          });
-                      if (insertError) {
-                          logger.error(`Error inserting comment ${comment.cid}`, { error: insertError });
-                          // Handle potential duplicate key errors if fetch failed but insert happens?
-                          throw insertError;
-                      }
-                  }
-                  // --- End Upsert Logic ---
-              } // End for loop
-          }); // End step.run process-comments
-      } // End if comments.length > 0
-
-      // 5. Update crawl status based on outcome
+      // 5. Update crawl status based on outcome using service
       if (nextContinuationToken) {
         // More pages exist
         logger.info(`Updating crawl ${crawlId} status to PENDING for next page.`);
-        const { error: updateNextError } = await step.run("update-crawl-next-page", async () => {
-            return await supabase
-              .from('crawl_status')
-              .update({
-                status: CrawlStatusEnum.PENDING,
-                continuation_token: nextContinuationToken,
-                last_successful_page_at: new Date().toISOString(),
-                error_message: null, // Clear previous error on success
-                updated_at: new Date().toISOString(),
-              })
-              .eq('crawl_id', crawlId);
+        await step.run("update-crawl-next-page", async () => {
+            try {
+                await crawlStatusService.updateCrawlNextPage(crawlId, nextContinuationToken);
+            } catch (error) {
+                logger.error("Error updating crawl status for next page via service", { error });
+                throw error;
+            }
         });
-         if (updateNextError) {
-            logger.error("Error updating crawl status for next page", { error: updateNextError });
-            throw updateNextError;
-         }
 
         // Trigger next page fetch
         logger.info(`Sending event to fetch next page for crawl ${crawlId}.`);
@@ -440,45 +282,27 @@ const fetchCommentPage = inngest.createFunction(
       } else {
         // No more pages, crawl complete
         logger.info(`Crawl ${crawlId} completed. No next continuation token.`);
-        const { error: updateCompleteError } = await step.run("mark-crawl-completed", async () => {
-            return await supabase
-              .from('crawl_status')
-              .update({
-                status: CrawlStatusEnum.COMPLETED,
-                continuation_token: null, // Clear token
-                last_successful_page_at: new Date().toISOString(),
-                error_message: null, // Clear previous error on success
-                updated_at: new Date().toISOString(),
-              })
-              .eq('crawl_id', crawlId);
+        await step.run("mark-crawl-completed", async () => {
+            try {
+                await crawlStatusService.markCrawlCompleted(crawlId);
+            } catch (error) {
+                logger.error("Error marking crawl as completed via service", { error });
+                throw error;
+            }
         });
-        if (updateCompleteError) {
-            logger.error("Error marking crawl as completed", { error: updateCompleteError });
-            throw updateCompleteError;
-        }
         return { status: "Completed", nextPage: false, commentsProcessed: comments.length };
       }
 
     } catch (error: any) {
-      logger.error(`Failed to fetch/process page for crawl ${crawlId}: ${error.message}`, { error });
-      // Mark as FAILED, Inngest will handle retries
-      const { error: failError } = await step.run("mark-crawl-failed", async () => {
-          return await supabase
-            .from('crawl_status')
-            .update({
-              status: CrawlStatusEnum.FAILED,
-              error_message: error.message || 'Unknown error during page fetch/process',
-              // Keep the problematic continuation_token
-              updated_at: new Date().toISOString(),
-            })
-            .eq('crawl_id', crawlId);
+      const errorMessage = error.message || 'Unknown error during page fetch/process';
+      logger.error(`Failed to fetch/process page for crawl ${crawlId}: ${errorMessage}`, { error });
+      // Mark as FAILED using service, Inngest will handle retries
+      await step.run("mark-crawl-failed", async () => {
+          // Service handles logging internal errors
+          await crawlStatusService.markCrawlFailed(crawlId, errorMessage);
       });
-       if (failError) {
-            // Log the error but don't throw again, let the original error propagate
-            logger.error("Error marking crawl as failed after processing error", { error: failError });
-       }
       // Re-throw the original error to signal failure to Inngest for retry
-      throw error;
+      throw error; // Ensure the original error is thrown for Inngest retry logic
     }
   }
 );
