@@ -5,25 +5,19 @@ export enum CrawlSortBy {
   RECENT = 'RECENT',
 }
 
-export enum CrawlStatusEnum {
-  PENDING = 'PENDING',
-  IN_PROGRESS = 'IN_PROGRESS',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-}
+/* CrawlStatusEnum removed: status is no longer orchestrated in DB */
 
 export interface CrawlStatusRow {
-  crawl_id: number; // Assuming it's not generated in the client
+  crawl_id: number;
   video_id: string;
   sort_by: CrawlSortBy;
   continuation_token: string | null;
-  status: CrawlStatusEnum | null;
-  last_attempted_at: string | null; // Supabase returns dates as strings
+  last_attempted_at: string | null;
   last_successful_page_at: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
-  ytcfg: any | null; // TODO: Add JSON column to DB schema
+  ytcfg: any | null;
 }
 
 export interface CommentsRow {

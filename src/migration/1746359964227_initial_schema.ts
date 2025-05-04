@@ -7,10 +7,7 @@ export async function up(db: Kysely<any>): Promise<void> {
     .asEnum(['POPULAR', 'RECENT'])
     .execute();
 
-  await db.schema
-    .createType('crawl_job_status')
-    .asEnum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED'])
-    .execute();
+  // Removed crawl_job_status ENUM as status is no longer orchestrated in DB
 
   // Create videos table
   await db.schema
@@ -108,18 +105,15 @@ export async function up(db: Kysely<any>): Promise<void> {
     .column('attribute_name')
     .execute();
 
-  // Create crawl_status table
+  // Create crawl_status table (status column removed)
   await db.schema
     .createTable('crawl_status')
     .addColumn('crawl_id', 'bigserial', (col) => col.primaryKey())
     .addColumn('video_id', 'varchar(11)', (col) =>
       col.references('videos.video_id').onDelete('cascade').notNull()
     )
-    // Use the created ENUM type
     .addColumn('sort_by', sql`crawl_sort_by`, (col) => col.notNull())
     .addColumn('continuation_token', 'text')
-    // Use the created ENUM type
-    .addColumn('status', sql`crawl_job_status`, (col) => col.defaultTo('PENDING'))
     .addColumn('last_attempted_at', 'timestamptz')
     .addColumn('last_successful_page_at', 'timestamptz')
     .addColumn('error_message', 'text')
@@ -127,18 +121,11 @@ export async function up(db: Kysely<any>): Promise<void> {
       col.defaultTo(sql`CURRENT_TIMESTAMP`)
     )
     .addColumn('updated_at', 'timestamptz')
-    // Add the ytcfg column
-    .addColumn('ytcfg', 'jsonb') // Using jsonb for efficiency
-    // Add unique constraint directly in table definition
+    .addColumn('ytcfg', 'jsonb')
     .addUniqueConstraint('uq_crawl_video_sort', ['video_id', 'sort_by'])
     .execute();
 
-  // Add indexes on crawl_status table
-  await db.schema
-    .createIndex('idx_crawl_status_status')
-    .on('crawl_status')
-    .column('status')
-    .execute();
+  // Add index on crawl_status.video_id only (status index removed)
   await db.schema
     .createIndex('idx_crawl_status_video_id')
     .on('crawl_status')
@@ -154,6 +141,6 @@ export async function down(db: Kysely<any>): Promise<void> {
   await db.schema.dropTable('videos').ifExists().execute();
 
   // Drop ENUM types after tables that use them are dropped
-  await db.schema.dropType('crawl_job_status').ifExists().execute();
+  // Removed: await db.schema.dropType('crawl_job_status').ifExists().execute();
   await db.schema.dropType('crawl_sort_by').ifExists().execute();
 }

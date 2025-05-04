@@ -133,3 +133,20 @@ test('should yield comments from getComments and call callback', async () => {
   // Expect the callback to receive the token *string*
   expect(mockCallback).toHaveBeenCalledWith(expect.any(Array), expect.any(String));
 });
+
+// Rickroll test case (real network call)
+test('should yield up to maxComments for Rick Astley video (real fetch)', async () => {
+  // Restore the real fetch for this test only
+  globalThis.fetch = originalFetch;
+
+  const comments: YoutubeComment[] = [];
+  let count = 0;
+  for await (const comment of getComments('dQw4w9WgXcQ', SortBy.POPULAR, undefined, 0, undefined, 3)) {
+    comments.push(comment);
+    count++;
+    if (count >= 3) break;
+  }
+  expect(comments.length).toBeGreaterThan(0);
+  expect(comments[0].author).toBeTruthy();
+  expect(typeof comments[0].text).toBe('string');
+});

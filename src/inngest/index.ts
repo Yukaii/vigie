@@ -1,11 +1,11 @@
-import { Inngest, Context, EventSchemas } from "inngest";
+import { Inngest, InngestMiddleware, Context, EventSchemas } from "inngest";
+import type { Context as HonoContext } from "hono";
 import {
   CrawlSortBy,
-  CrawlStatusEnum,
   CrawlStatusRow,
-} from './types'; // Only need crawl types here now
-import { CrawlStatusService } from '../services/crawlStatusService'; // Import crawl status service class
-import { CommentService } from '../services/commentService'; // Import comment service class
+} from './types';
+import { CrawlStatusService } from '../services/crawlStatusService';
+import { CommentService } from '../services/commentService';
 import {
   SortBy,
   getInitialCrawlData,
@@ -13,6 +13,31 @@ import {
   YoutubeComment,
 } from '../youtube/comment-downloader';
 // --- End Comment Downloader Imports ---
+
+type Bindings = {
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+};
+
+const bindings = new InngestMiddleware({
+  name: "Hono bindings",
+  init({ client, fn }) {
+    return {
+      onFunctionRun({ ctx, fn, steps, reqArgs }) {
+        return {
+          transformInput({ ctx, fn, steps }) {
+            const [honoCtx] = reqArgs as [HonoContext<{ Bindings: Bindings }>];
+            return {
+              ctx: {
+                env: honoCtx.env,
+              },
+            };
+          },
+        };
+      },
+    };
+  },
+});
 
 // Define Event Schemas
 type Events = {
@@ -34,6 +59,7 @@ type Events = {
 export const inngest = new Inngest({
   id: "vigie",
   schemas: new EventSchemas().fromRecord<Events>(),
+  middleware: [bindings],
 });
 
 // --- Inngest Functions ---
@@ -66,6 +92,14 @@ const triggerCommentCrawl = inngest.createFunction(
       }
     });
 
+    // --- New logic: Ensure video exists in videos table with metadata ---
+    const { VideoService } = await import("../services/videoService");
+    const videoService = new VideoService(supabase);
+    await step.run("ensure-video-with-meta", async () => {
+      await videoService.ensureVideoWithMeta(videoId);
+    });
+    // --- End new logic ---
+
     let crawlId: number;
     let initialContinuationToken: string | null = null;
     let needsInitialFetch = false;
@@ -91,22 +125,9 @@ const triggerCommentCrawl = inngest.createFunction(
         throw new Error("Crawl record unexpectedly null after check.");
       }
       crawlId = crawl.crawl_id;
-      logger.info(`Existing crawl found (ID: ${crawlId}, Status: ${crawl.status}) for ${videoId} (${sortByString}).`);
-      if (crawl.status === CrawlStatusEnum.COMPLETED || crawl.status === CrawlStatusEnum.FAILED) {
-        logger.info(`Restarting ${crawl.status} crawl (ID: ${crawlId}).`);
-        await step.run("restart-crawl", async () => {
-          try {
-            await crawlStatusService.restartCrawl(crawlId);
-          } catch (error) {
-            logger.error("Error restarting crawl via service", { error });
-            throw error;
-          }
-        });
-        needsInitialFetch = true;
-      } else if (crawl.status === CrawlStatusEnum.IN_PROGRESS || crawl.status === CrawlStatusEnum.PENDING) {
-        logger.warn(`Crawl ${crawlId} for ${videoId} (${sortByString}) is already ${crawl.status}. Skipping trigger.`);
-        return { status: "Skipped", reason: `Already ${crawl.status}` };
-      }
+      logger.info(`Existing crawl found (ID: ${crawlId}) for ${videoId} (${sortByString}).`);
+      // No status orchestration: always proceed to fetch and update crawl_status as metadata only
+      needsInitialFetch = true;
     }
 
     if (needsInitialFetch) {
@@ -195,13 +216,9 @@ const fetchCommentPage = inngest.createFunction(
       throw error;
     }
 
-    // Validate crawl state
-    if (crawl.status !== CrawlStatusEnum.PENDING && crawl.status !== CrawlStatusEnum.IN_PROGRESS) {
-      logger.warn(`Skipping fetch for crawl ${crawlId}. Status is ${crawl.status}.`);
-      return { status: "Skipped", reason: `Invalid status: ${crawl.status}` };
-    }
+    // Validate crawl state (status removed, only check for continuation_token)
     if (!crawl.continuation_token) {
-      logger.warn(`Crawl ${crawlId} is ${crawl.status} but has no continuation token. Marking complete.`);
+      logger.warn(`Crawl ${crawlId} has no continuation token. Marking complete.`);
       await step.run("mark-crawl-completed-no-token-fetch", async () => {
         await crawlStatusService.markCrawlCompleteNoToken(crawlId);
       });

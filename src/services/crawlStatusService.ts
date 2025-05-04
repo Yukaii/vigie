@@ -1,7 +1,6 @@
 import { DbClient } from '../db';
 import {
   CrawlSortBy,
-  CrawlStatusEnum,
   CrawlStatusRow,
 } from '../inngest/types';
 
@@ -28,12 +27,35 @@ export class CrawlStatusService {
   }
 
   async createCrawlRecord(videoId: string, sortBy: CrawlSortBy): Promise<CrawlStatusRow> {
+    // Ensure video exists in videos table
+    const { data: videoData, error: videoError } = await this.db
+      .from('videos')
+      .select('video_id')
+      .eq('video_id', videoId)
+      .maybeSingle();
+
+    if (videoError) {
+      console.error("Error checking video existence", { videoError });
+      throw videoError;
+    }
+
+    if (!videoData) {
+      // Insert minimal video record
+      const { error: insertVideoError } = await this.db
+        .from('videos')
+        .insert({ video_id: videoId });
+
+      if (insertVideoError) {
+        console.error("Error inserting video record", { insertVideoError });
+        throw insertVideoError;
+      }
+    }
+
     const { data, error } = await this.db
       .from('crawl_status')
       .insert({
         video_id: videoId,
         sort_by: sortBy,
-        status: CrawlStatusEnum.PENDING,
         ytcfg: null,
       })
       .select()
@@ -46,22 +68,17 @@ export class CrawlStatusService {
     return data as CrawlStatusRow;
   }
 
+  // No-op: status orchestration is handled by Inngest, not the DB
   async restartCrawl(crawlId: number): Promise<void> {
-    const { error } = await this.db
+    await this.db
       .from('crawl_status')
       .update({
-        status: CrawlStatusEnum.PENDING,
         continuation_token: null,
         ytcfg: null,
         error_message: null,
         updated_at: new Date().toISOString(),
       })
       .eq('crawl_id', crawlId);
-
-    if (error) {
-      console.error("Error updating crawl status to PENDING for restart", { error });
-      throw error;
-    }
   }
 
   async updateCrawlWithInitialToken(crawlId: number, token: string, ytcfg: any): Promise<void> {
@@ -81,32 +98,20 @@ export class CrawlStatusService {
   }
 
   async markCrawlCompleteNoToken(crawlId: number): Promise<void> {
-     const { error } = await this.db
+     await this.db
       .from('crawl_status')
-      .update({ status: CrawlStatusEnum.COMPLETED, updated_at: new Date().toISOString() })
+      .update({ updated_at: new Date().toISOString() })
       .eq('crawl_id', crawlId);
-
-     if (error) {
-        console.error("Error marking crawl as completed (no token)", { error });
-        // Decide if this should throw or just log
-        // throw error;
-     }
   }
 
   async markCrawlFailed(crawlId: number, errorMessage: string): Promise<void> {
-    const { error } = await this.db
+    await this.db
       .from('crawl_status')
       .update({
-        status: CrawlStatusEnum.FAILED,
         error_message: errorMessage,
         updated_at: new Date().toISOString(),
       })
       .eq('crawl_id', crawlId);
-
-    if (error) {
-      console.error("Error marking crawl as failed", { error });
-      // Log the error but don't throw again, let the original error propagate if called within a catch block
-    }
   }
 
   async getCrawlDetails(crawlId: number): Promise<CrawlStatusRow> {
@@ -123,55 +128,38 @@ export class CrawlStatusService {
     return data;
   }
 
+  // No-op: status orchestration is handled by Inngest, not the DB
   async setCrawlInProgress(crawlId: number): Promise<void> {
-    const { error } = await this.db
+    await this.db
       .from('crawl_status')
       .update({
-        status: CrawlStatusEnum.IN_PROGRESS,
         last_attempted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('crawl_id', crawlId);
-
-    if (error) {
-      console.error("Error setting crawl status to IN_PROGRESS", { error });
-      throw error;
-    }
   }
 
   async updateCrawlNextPage(crawlId: number, nextToken: string): Promise<void> {
-    const { error } = await this.db
+    await this.db
       .from('crawl_status')
       .update({
-        status: CrawlStatusEnum.PENDING,
         continuation_token: nextToken,
         last_successful_page_at: new Date().toISOString(),
         error_message: null, // Clear previous error on success
         updated_at: new Date().toISOString(),
       })
       .eq('crawl_id', crawlId);
-
-    if (error) {
-      console.error("Error updating crawl status for next page", { error });
-      throw error;
-    }
   }
 
   async markCrawlCompleted(crawlId: number): Promise<void> {
-    const { error } = await this.db
+    await this.db
       .from('crawl_status')
       .update({
-        status: CrawlStatusEnum.COMPLETED,
         continuation_token: null, // Clear token
         last_successful_page_at: new Date().toISOString(),
         error_message: null, // Clear previous error on success
         updated_at: new Date().toISOString(),
       })
       .eq('crawl_id', crawlId);
-
-    if (error) {
-      console.error("Error marking crawl as completed", { error });
-      throw error;
-    }
   }
 }

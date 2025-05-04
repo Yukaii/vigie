@@ -285,20 +285,43 @@ export async function getInitialCrawlData(
     }
 
     // Get the continuation token for the desired sort order
-    const initialContinuationEndpoint = sortMenu[sortBy].serviceEndpoint;
-    const initialToken = initialContinuationEndpoint?.continuationCommand?.token;
+    let initialToken: string | null = null;
+
+    const sortMenuItem = sortMenu[sortBy];
+    if (sortMenuItem && sortMenuItem.serviceEndpoint) {
+        const initialContinuationEndpoint = sortMenuItem.serviceEndpoint;
+        initialToken = initialContinuationEndpoint?.continuationCommand?.token || null;
+    }
+
+    // Fallback: Try to find any continuation token in the initial data if sortMenu is missing or malformed
+    if (!initialToken) {
+        // Try to find any continuation token in sectionListRenderer
+        const sectionList = [...searchDict(data, 'sectionListRenderer')][0] || {};
+        const continuations = [...searchDict(sectionList, 'continuationEndpoint')];
+        if (continuations.length) {
+            initialToken = continuations[0]?.continuationCommand?.token || null;
+        }
+    }
+
+    // Fallback: Try to find any continuation token in the entire data object
+    if (!initialToken) {
+        const allContinuations = [...searchDict(data, 'continuationCommand')];
+        if (allContinuations.length) {
+            initialToken = allContinuations[0]?.token || null;
+        }
+    }
+
+    // Fallback: Try to use nextContinuationToken from processAjaxResponse if comments exist
+    if (!initialToken) {
+        const { comments, nextContinuationToken } = processAjaxResponse(data);
+        if (comments.length > 0 && nextContinuationToken) {
+            console.warn("Using continuation token found after fallback search.");
+            return { continuationToken: nextContinuationToken, ytcfg };
+        }
+    }
 
     if (!initialToken) {
-         // It's possible the first page of comments is already in the 'data' from the ajax request above
-         // Check if comments exist in the response used to get the sort menu
-         const { comments, nextContinuationToken } = processAjaxResponse(data);
-         if (comments.length > 0 && nextContinuationToken) {
-             // If the first page was loaded to get the sort menu, return its continuation token
-             console.warn("Using continuation token found after fetching sort menu.");
-             return { continuationToken: nextContinuationToken, ytcfg };
-         } else {
-            throw new Error("Could not find the initial continuation token.");
-         }
+        throw new Error("Could not find the initial continuation token. The YouTube page structure may have changed or comments are disabled.");
     }
 
     return { continuationToken: initialToken, ytcfg };
@@ -344,7 +367,8 @@ export async function* getCommentsFromUrl(
   sortBy: SortBy = SortBy.RECENT,
   language?: string,
   sleep = 100,
-  callback?: FetchCallback // Keep callback for potential external use
+  callback?: FetchCallback, // Keep callback for potential external use
+  maxComments?: number
 ): AsyncGenerator<YoutubeComment> {
     try {
         // Extract videoId from URL
@@ -361,6 +385,7 @@ export async function* getCommentsFromUrl(
         );
 
         let currentToken: string | null = initialToken;
+        let yielded = 0;
 
         while (currentToken) {
             const { comments, nextContinuationToken } = await fetchCommentPageData(
@@ -375,7 +400,15 @@ export async function* getCommentsFromUrl(
             }
 
             for (const comment of comments) {
+                if (maxComments !== undefined && yielded >= maxComments) {
+                  return;
+                }
                 yield comment;
+                yielded++;
+            }
+
+            if (maxComments !== undefined && yielded >= maxComments) {
+              return;
             }
 
             currentToken = nextContinuationToken;
@@ -429,7 +462,8 @@ export async function* getComments(
   sortBy: SortBy = SortBy.RECENT,
   language?: string,
   sleep = 100,
-  callback?: FetchCallback
+  callback?: FetchCallback,
+  maxComments?: number
 ): AsyncGenerator<YoutubeComment> {
-  yield* getCommentsFromUrl(YOUTUBE_VIDEO_URL + youtubeId, sortBy, language, sleep, callback);
+  yield* getCommentsFromUrl(YOUTUBE_VIDEO_URL + youtubeId, sortBy, language, sleep, callback, maxComments);
 }
