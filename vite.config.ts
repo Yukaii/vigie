@@ -4,7 +4,7 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 import path from "node:path"
 
 export default defineConfig({
-  plugins: [,
+  plugins: [
     react(), cloudflare(),
   ],
   resolve: {
@@ -16,11 +16,11 @@ export default defineConfig({
     // stub out a minimal process.stdout
     'process.stdout': {
       isTTY: false,
-      write: () => {},
+      write: () => { },
     },
     'process.stderr': {
       isTTY: false,
-      write: () => {},
+      write: () => { },
     }
   }
 });
