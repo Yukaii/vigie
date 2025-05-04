@@ -2,11 +2,9 @@ import { defineConfig } from 'kysely-ctl'; // Use defineConfig
 import { PostgresDialect, type Dialect } from 'kysely';
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
-import * as dotenv from 'dotenv';
-// No longer need path or fileURLToPath for migration folder resolution
 
 // Load environment variables from .env file if it exists
-dotenv.config();
+require('@dotenvx/dotenvx').config();
 
 // Define the pool configuration
 const poolConfig: PoolConfig = {
@@ -20,7 +18,7 @@ const poolConfig: PoolConfig = {
 
 // Define the dialect using an async function for the pool
 const dialect: Dialect = new PostgresDialect({
-  pool: async () => new Pool(poolConfig) // Use async function to return the pool
+  pool: new Pool(poolConfig)
 });
 
 // Export configuration using defineConfig and a relative path
