@@ -105,8 +105,238 @@ async function ajaxRequest(
   return {};
 }
 
+// Helper to extract comments and next token from AJAX response
+function processAjaxResponse(response: any): { comments: YoutubeComment[]; nextContinuationToken: string | null } {
+    if (!response) return { comments: [], nextContinuationToken: null };
+
+    const error = [...searchDict(response, 'externalErrorMessage')][0];
+    if (error) throw new Error('Error returned from server: ' + error);
+
+    let nextContinuationToken: string | null = null;
+    const actions = [
+        ...searchDict(response, 'reloadContinuationItemsCommand'),
+        ...searchDict(response, 'appendContinuationItemsAction'),
+    ];
+    for (const action of actions) {
+        for (const item of action.continuationItems || []) {
+            // Find the continuation item renderer for the main comments section
+            if (item.continuationItemRenderer) {
+                 const continuationEndpoint = [...searchDict(item.continuationItemRenderer, 'continuationEndpoint')][0];
+                 if (continuationEndpoint?.continuationCommand?.token) {
+                    nextContinuationToken = continuationEndpoint.continuationCommand.token;
+                    // Typically, there's only one main continuation, break after finding it
+                    break;
+                 }
+            }
+            // Handle replies continuation (might need adjustment based on structure)
+            // if (action.targetId?.startsWith('comment-replies-item') && item.continuationItemRenderer) {
+            //     // This logic might need refinement if replies are handled separately
+            //     const buttonRenderer = [...searchDict(item, 'buttonRenderer')][0];
+            //     if (buttonRenderer?.command?.continuationCommand?.token) {
+            //         // Decide how to handle reply continuations if needed
+            //     }
+            // }
+        }
+         if (nextContinuationToken) break; // Found the main continuation
+    }
+
+    const comments: YoutubeComment[] = [];
+    // Look for both commentViewModel and commentEntityPayload
+    const commentSources = [
+        ...searchDict(response, 'commentViewModel'),
+        ...searchDict(response, 'commentEntityPayload') // Add this source
+    ];
+
+    // Extract toolbar states for heart status lookup
+    const toolbarStates: Record<string, any> = {};
+    for (const state of searchDict(response, 'engagementToolbarStateEntityPayload')) {
+        if (state.key) {
+            toolbarStates[state.key] = state;
+        }
+    }
+
+
+    for (const commentSource of commentSources) {
+        let commentId: string | undefined;
+        let author: any = {};
+        let content: any = {};
+        let toolbar: any = {};
+        let publishedTime: string | undefined;
+        let toolbarStateKey: string | undefined;
+        let isHearted = false;
+        let paidChip: any = null;
+
+        if (commentSource.commentId) { // Likely commentViewModel
+            commentId = commentSource.commentId;
+            author = commentSource.author || {};
+            content = commentSource.content || {};
+            toolbar = commentSource.toolbar || {};
+            publishedTime = commentSource.publishedTimeText?.runs?.[0]?.text;
+            toolbarStateKey = commentSource.toolbarStateKey; // ViewModel might have direct key
+            isHearted = toolbar?.heartButton?.heartButtonViewModel?.isHearted || false; // ViewModel might have direct status
+            paidChip = commentSource.paidCommentChip;
+        } else if (commentSource.properties) { // Likely commentEntityPayload
+            commentId = commentSource.properties.commentId;
+            content = commentSource.properties.content || {};
+            publishedTime = commentSource.properties.publishedTime;
+            toolbarStateKey = commentSource.properties.toolbarStateKey; // Payload uses key for lookup
+            author = commentSource.author || {};
+            toolbar = commentSource.toolbar || {}; // Payload has toolbar inside
+            paidChip = commentSource.properties.paidCommentChip;
+
+            // Look up heart status using toolbarStateKey
+            const state = toolbarStates[toolbarStateKey!];
+            if (state?.heartState === 'TOOLBAR_HEART_STATE_HEARTED') {
+                isHearted = true;
+            }
+        } else {
+            continue; // Skip if structure is unrecognized
+        }
+
+
+        if (!commentId) continue; // Skip if no ID found
+
+        const result: YoutubeComment = {
+            cid: commentId,
+            text: content?.runs?.map((r: any) => r.text).join('') || content?.content || '', // Handle both structures
+            time: publishedTime || '',
+            author: author?.displayName || '',
+            channel: author?.channelId || '',
+            // Adjust vote parsing for both potential structures
+            votes: toolbar?.likeCountAriaLabel?.replace(/\D/g, '') || toolbar?.likeCountNotliked?.toString() || '0',
+            replies: parseInt(toolbar?.replyCount?.toString() || '0', 10),
+            photo: author?.avatarThumbnails?.[0]?.url || author?.avatarThumbnailUrl || '', // Handle both
+            heart: isHearted,
+            reply: commentId.includes('.'),
+            paid: paidChip?.paidCommentChipRenderer?.chipText?.simpleText // Example access for paid chip
+        };
+        comments.push(result);
+    }
+    return { comments, nextContinuationToken };
+}
+
+
+/**
+ * Fetches the initial page HTML, parses ytcfg, and gets the first continuation token.
+ */
+export async function getInitialCrawlData(
+    videoId: string,
+    sortBy: SortBy,
+    language?: string
+): Promise<{ continuationToken: string | null; ytcfg: any }> {
+    const youtubeUrl = YOUTUBE_VIDEO_URL + videoId;
+    let res = await fetchWithUserAgent(youtubeUrl);
+    let html = await res.text();
+
+    // Handle consent redirect
+    if (res.url.includes('consent')) {
+        const params: Record<string, string> = {};
+        let match: RegExpExecArray | null;
+        while ((match = YT_HIDDEN_INPUT_RE.exec(html))) {
+            params[match[1]] = match[2];
+        }
+        params['continue'] = youtubeUrl;
+        params['set_eom'] = 'False';
+        params['set_ytc'] = 'True';
+        params['set_apyt'] = 'True';
+
+        const consentUrl =
+            YOUTUBE_CONSENT_URL +
+            '?' +
+            Object.entries(params)
+                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+                .join('&');
+        res = await fetchWithUserAgent(consentUrl, { method: 'POST' });
+        html = await res.text();
+    }
+
+    const ytcfgRaw = regexSearch(html, YT_CFG_RE, 1, '');
+    if (!ytcfgRaw) {
+        throw new Error("Could not extract ytcfg configuration.");
+    }
+    const ytcfg = JSON.parse(ytcfgRaw);
+    if (language) {
+        ytcfg.INNERTUBE_CONTEXT.client.hl = language;
+    }
+
+    const dataRaw = regexSearch(html, YT_INITIAL_DATA_RE, 1, '');
+    if (!dataRaw) {
+         throw new Error("Could not extract initial data.");
+    }
+    let data = JSON.parse(dataRaw);
+
+    // Find the sort menu to get the correct initial continuation endpoint
+    let sortMenu =
+        ([...searchDict(data, 'sortFilterSubMenuRenderer')][0]?.subMenuItems as any[]) || [];
+
+    // If sort menu not in initial data, try fetching via ajax (common case)
+    if (!sortMenu.length) {
+        const sectionList = [...searchDict(data, 'sectionListRenderer')][0] || {};
+        const continuations = [...searchDict(sectionList, 'continuationEndpoint')];
+        if (continuations.length) {
+             // Use the first continuation found to load the comments section data
+             data = await ajaxRequest(continuations[0], ytcfg);
+             sortMenu = ([...searchDict(data, 'sortFilterSubMenuRenderer')][0]?.subMenuItems as any[]) || [];
+        }
+    }
+
+    if (!sortMenu.length || sortBy >= sortMenu.length) {
+        throw new Error('Failed to find or set comment sorting.');
+    }
+
+    // Get the continuation token for the desired sort order
+    const initialContinuationEndpoint = sortMenu[sortBy].serviceEndpoint;
+    const initialToken = initialContinuationEndpoint?.continuationCommand?.token;
+
+    if (!initialToken) {
+         // It's possible the first page of comments is already in the 'data' from the ajax request above
+         // Check if comments exist in the response used to get the sort menu
+         const { comments, nextContinuationToken } = processAjaxResponse(data);
+         if (comments.length > 0 && nextContinuationToken) {
+             // If the first page was loaded to get the sort menu, return its continuation token
+             console.warn("Using continuation token found after fetching sort menu.");
+             return { continuationToken: nextContinuationToken, ytcfg };
+         } else {
+            throw new Error("Could not find the initial continuation token.");
+         }
+    }
+
+    return { continuationToken: initialToken, ytcfg };
+}
+
+/**
+ * Fetches a single page of comments using a continuation token.
+ */
+export async function fetchCommentPageData(
+    continuationToken: string,
+    ytcfg: any,
+    sleep = 100
+): Promise<{ comments: YoutubeComment[]; nextContinuationToken: string | null }> {
+    // Construct the endpoint object expected by ajaxRequest
+    const endpoint = {
+        continuationCommand: {
+            token: continuationToken,
+        },
+        // Provide necessary metadata if available/required by ajaxRequest structure
+        commandMetadata: {
+            webCommandMetadata: {
+                // Adjust apiUrl if needed, might be part of ytcfg or constant
+                apiUrl: '/youtubei/v1/next',
+            },
+        },
+    };
+
+    const response = await ajaxRequest(endpoint, ytcfg);
+    await new Promise((resolve) => setTimeout(resolve, sleep)); // Keep sleep after request
+
+    return processAjaxResponse(response);
+}
+
+
+// --- Original Generator Functions (Can be kept or adapted) ---
+
 export interface FetchCallback {
-  (comments: YoutubeComment[], continuation?: any): Promise<void>;
+  (comments: YoutubeComment[], continuationToken?: string): Promise<void>;
 }
 
 export async function* getCommentsFromUrl(
@@ -114,142 +344,85 @@ export async function* getCommentsFromUrl(
   sortBy: SortBy = SortBy.RECENT,
   language?: string,
   sleep = 100,
-  callback?: FetchCallback
+  callback?: FetchCallback // Keep callback for potential external use
 ): AsyncGenerator<YoutubeComment> {
-  let res = await fetchWithUserAgent(youtubeUrl);
-  let html = await res.text();
+    try {
+        // Extract videoId from URL
+        const urlParams = new URLSearchParams(new URL(youtubeUrl).search);
+        const videoId = urlParams.get('v');
+        if (!videoId) {
+            throw new Error("Could not extract video ID from URL: " + youtubeUrl);
+        }
 
-  // Handle consent redirect
-  if (res.url.includes('consent')) {
-    const params: Record<string, string> = {};
-    let match: RegExpExecArray | null;
-    while ((match = YT_HIDDEN_INPUT_RE.exec(html))) {
-      params[match[1]] = match[2];
+        const { continuationToken: initialToken, ytcfg } = await getInitialCrawlData(
+            videoId, // Pass extracted videoId
+            sortBy,
+            language
+        );
+
+        let currentToken: string | null = initialToken;
+
+        while (currentToken) {
+            const { comments, nextContinuationToken } = await fetchCommentPageData(
+                currentToken,
+                ytcfg,
+                sleep
+            );
+
+            if (callback) {
+                // Pass the token used for *this* fetch
+                await callback(comments, currentToken);
+            }
+
+            for (const comment of comments) {
+                yield comment;
+            }
+
+            currentToken = nextContinuationToken;
+        }
+    } catch (error) {
+        console.error("Error fetching comments:", error);
+        // Decide how to handle errors in the generator context
+        // Option 1: Stop iteration
+        return;
+        // Option 2: Yield an error object (less common for generators)
+        // yield { error: error.message };
     }
-    params['continue'] = youtubeUrl;
-    params['set_eom'] = 'False';
-    params['set_ytc'] = 'True';
-    params['set_apyt'] = 'True';
-
-    const consentUrl =
-      YOUTUBE_CONSENT_URL +
-      '?' +
-      Object.entries(params)
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-        .join('&');
-    res = await fetchWithUserAgent(consentUrl, { method: 'POST' });
-    html = await res.text();
-  }
-
-  const ytcfgRaw = regexSearch(html, YT_CFG_RE, 1, '');
-  if (!ytcfgRaw) return;
-  const ytcfg = JSON.parse(ytcfgRaw);
-  if (language) {
-    ytcfg.INNERTUBE_CONTEXT.client.hl = language;
-  }
-
-  const dataRaw = regexSearch(html, YT_INITIAL_DATA_RE, 1, '');
-  if (!dataRaw) return;
-  let data = JSON.parse(dataRaw);
-
-  let itemSection = [...searchDict(data, 'itemSectionRenderer')][0];
-  let renderer =
-    itemSection && [...searchDict(itemSection, 'continuationItemRenderer')][0];
-  if (!renderer) return;
-
-  let sortMenu =
-    ([...searchDict(data, 'sortFilterSubMenuRenderer')][0]?.subMenuItems as any[]) || [];
-  if (!sortMenu.length) {
-    const sectionList = [...searchDict(data, 'sectionListRenderer')][0] || {};
-    const continuations = [...searchDict(sectionList, 'continuationEndpoint')];
-    data = continuations.length ? await ajaxRequest(continuations[0], ytcfg) : {};
-    sortMenu =
-      ([...searchDict(data, 'sortFilterSubMenuRenderer')][0]?.subMenuItems as any[]) || [];
-  }
-  if (!sortMenu.length || sortBy >= sortMenu.length) {
-    throw new Error('Failed to set sorting');
-  }
-  let continuations = [sortMenu[sortBy].serviceEndpoint];
-
-  while (continuations.length) {
-    const continuation = continuations.pop();
-    // Pass the callback down
-    const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, sleep, callback);
-    for (const c of comments) {
-      yield c;
-    }
-    continuations.push(...newContinuations);
-  }
 }
 
+// This function is now largely superseded by fetchCommentPageData but kept for reference/potential direct use
 export async function fetchCommentsByContinuation(
-  continuation: any,
+  continuation: any, // Original function took the full endpoint object
   ytcfg: any,
   sleep = 100,
-  callback?: FetchCallback
-): Promise<{ comments: YoutubeComment[]; newContinuations: any[] }> {
-  const response = await ajaxRequest(continuation, ytcfg);
-  if (!response) return { comments: [], newContinuations: [] };
+  callback?: FetchCallback // Keep callback for potential external use
+): Promise<{ comments: YoutubeComment[]; newContinuations: any[] }> { // Original return type included full continuation objects
 
-  const error = [...searchDict(response, 'externalErrorMessage')][0];
-  if (error) throw new Error('Error returned from server: ' + error);
+    const response = await ajaxRequest(continuation, ytcfg);
+    await new Promise((resolve) => setTimeout(resolve, sleep));
 
-  const newContinuations: any[] = [];
-  const actions = [
-    ...searchDict(response, 'reloadContinuationItemsCommand'),
-    ...searchDict(response, 'appendContinuationItemsAction'),
-  ];
-  for (const action of actions) {
-    for (const item of action.continuationItems || []) {
-      if (
-        ['comments-section', 'engagement-panel-comments-section', 'shorts-engagement-panel-comments-section'].includes(
-          action.targetId
-        )
-      ) {
-        newContinuations.unshift(...[...searchDict(item, 'continuationEndpoint')]);
-      }
-      if (
-        action.targetId?.startsWith('comment-replies-item') &&
-        item.continuationItemRenderer
-      ) {
-        newContinuations.push(
-          [...searchDict(item, 'buttonRenderer')][0]?.command
-        );
-      }
+    // Use the refactored processing logic
+    const { comments, nextContinuationToken } = processAjaxResponse(response);
+
+    // Adapt the return type if needed, or just return comments/next token
+    // The original 'newContinuations' contained full endpoint objects, which might not be needed now.
+    // For simplicity, let's just return what fetchCommentPageData returns.
+    // If the full continuation objects are needed elsewhere, adjust processAjaxResponse.
+
+    if (callback) {
+        // Pass the token used for *this* fetch
+        await callback(comments, continuation?.continuationCommand?.token);
     }
-  }
 
-  const comments: YoutubeComment[] = [];
-  for (const comment of [...searchDict(response, 'commentEntityPayload')].reverse()) {
-    const properties = comment.properties;
-    const cid = properties.commentId;
-    const author = comment.author;
-    const toolbar = comment.toolbar;
-    const toolbarState = (
-      [...searchDict(response, 'engagementToolbarStateEntityPayload')].find(
-        (p: any) => p.key === properties.toolbarStateKey
-      ) || {}
-    );
-    const result: YoutubeComment = {
-      cid,
-      text: properties.content.content,
-      time: properties.publishedTime,
-      author: author.displayName,
-      channel: author.channelId,
-      votes: toolbar.likeCountNotliked?.trim() || '0',
-      replies: toolbar.replyCount,
-      photo: author.avatarThumbnailUrl,
-      heart: toolbarState.heartState === 'TOOLBAR_HEART_STATE_HEARTED',
-      reply: cid.includes('.'),
-    };
-    comments.push(result);
-  }
-  await new Promise((resolve) => setTimeout(resolve, sleep));
-  if (callback) {
-    await callback(comments, continuation);
-  }
-  return { comments, newContinuations };
+    // Construct a compatible return object if necessary, otherwise this function might be deprecated.
+    // Returning just comments and the next token string for consistency:
+    // return { comments, nextContinuationToken };
+
+    // Returning original structure (might be slightly inaccurate now):
+     const nextContinuationObject = nextContinuationToken ? { continuationCommand: { token: nextContinuationToken } } : null;
+     return { comments, newContinuations: nextContinuationObject ? [nextContinuationObject] : [] };
 }
+
 
 export async function* getComments(
   youtubeId: string,

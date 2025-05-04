@@ -127,6 +127,8 @@ export async function up(db: Kysely<any>): Promise<void> {
       col.defaultTo(sql`CURRENT_TIMESTAMP`)
     )
     .addColumn('updated_at', 'timestamptz')
+    // Add the ytcfg column
+    .addColumn('ytcfg', 'jsonb') // Using jsonb for efficiency
     // Add unique constraint directly in table definition
     .addUniqueConstraint('uq_crawl_video_sort', ['video_id', 'sort_by'])
     .execute();

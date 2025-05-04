@@ -114,11 +114,12 @@ test('fetchCommentsByContinuation calls callback with comments and continuation'
     votes: '5',
     replies: 2,
     photo: 'http://photo.url',
-    heart: false,
+    heart: false, // Adjusted based on mock data processing
     reply: false,
   });
   expect(Array.isArray(newContinuations)).toBe(true);
-  expect(mockCallback).toHaveBeenCalledWith(comments, continuation); // Added assertion
+  // Expect the callback to receive the token *string* used for the fetch
+  expect(mockCallback).toHaveBeenCalledWith(comments, continuation.continuationCommand.token);
 });
 
 test('should yield comments from getComments and call callback', async () => {
@@ -129,5 +130,6 @@ test('should yield comments from getComments and call callback', async () => {
   }
   expect(comments.length).toBe(1);
   expect(comments[0].cid).toBe('cid123');
-  expect(mockCallback).toHaveBeenCalledWith(expect.any(Array), expect.any(Object));
+  // Expect the callback to receive the token *string*
+  expect(mockCallback).toHaveBeenCalledWith(expect.any(Array), expect.any(String));
 });
