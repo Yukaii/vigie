@@ -25,6 +25,6 @@ export default defineConfig(({ command }) => {
 
    return {
     ...config,
-    plugins: [react(), build({ outputDir: 'dist-server' })]
+    plugins: [react(), build()]
   }
 });
