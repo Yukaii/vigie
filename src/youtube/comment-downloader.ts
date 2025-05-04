@@ -105,11 +105,16 @@ async function ajaxRequest(
   return {};
 }
 
+export interface FetchCallback {
+  (comments: YoutubeComment[], continuation?: any): Promise<void>;
+}
+
 export async function* getCommentsFromUrl(
   youtubeUrl: string,
   sortBy: SortBy = SortBy.RECENT,
   language?: string,
-  sleep = 100
+  sleep = 100,
+  callback?: FetchCallback
 ): AsyncGenerator<YoutubeComment> {
   let res = await fetchWithUserAgent(youtubeUrl);
   let html = await res.text();
@@ -168,7 +173,8 @@ export async function* getCommentsFromUrl(
 
   while (continuations.length) {
     const continuation = continuations.pop();
-    const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, sleep);
+    // Pass the callback down
+    const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, sleep, callback);
     for (const c of comments) {
       yield c;
     }
@@ -179,7 +185,8 @@ export async function* getCommentsFromUrl(
 export async function fetchCommentsByContinuation(
   continuation: any,
   ytcfg: any,
-  sleep = 100
+  sleep = 100,
+  callback?: FetchCallback
 ): Promise<{ comments: YoutubeComment[]; newContinuations: any[] }> {
   const response = await ajaxRequest(continuation, ytcfg);
   if (!response) return { comments: [], newContinuations: [] };
@@ -238,6 +245,9 @@ export async function fetchCommentsByContinuation(
     comments.push(result);
   }
   await new Promise((resolve) => setTimeout(resolve, sleep));
+  if (callback) {
+    await callback(comments, continuation);
+  }
   return { comments, newContinuations };
 }
 
@@ -245,7 +255,8 @@ export async function* getComments(
   youtubeId: string,
   sortBy: SortBy = SortBy.RECENT,
   language?: string,
-  sleep = 100
+  sleep = 100,
+  callback?: FetchCallback
 ): AsyncGenerator<YoutubeComment> {
-  yield* getCommentsFromUrl(YOUTUBE_VIDEO_URL + youtubeId, sortBy, language, sleep);
+  yield* getCommentsFromUrl(YOUTUBE_VIDEO_URL + youtubeId, sortBy, language, sleep, callback);
 }

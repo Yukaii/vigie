@@ -1,6 +1,6 @@
 // Jest test suite for YouTube Comment Downloader
 
-import { getCommentsFromUrl, getComments, fetchCommentsByContinuation, SortBy, YoutubeComment } from './comment-downloader';
+import { getCommentsFromUrl, getComments, fetchCommentsByContinuation, SortBy, YoutubeComment, FetchCallback } from './comment-downloader';
 
 const sampleHtml = `
 <script>
@@ -92,7 +92,7 @@ test('should yield comments from getCommentsFromUrl', async () => {
   });
 });
 
-test('fetchCommentsByContinuation returns comments and continuations', async () => {
+test('fetchCommentsByContinuation calls callback with comments and continuation', async () => {
   // Simulate a continuation and ytcfg as would be passed in real usage
   const continuation = {
     commandMetadata: { webCommandMetadata: { apiUrl: '/youtubei/v1/next' } },
@@ -102,7 +102,9 @@ test('fetchCommentsByContinuation returns comments and continuations', async () 
     INNERTUBE_CONTEXT: { client: { hl: 'en' } },
     INNERTUBE_API_KEY: 'test-api-key',
   };
-  const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, 0);
+
+  const mockCallback: FetchCallback = jest.fn();
+  const { comments, newContinuations } = await fetchCommentsByContinuation(continuation, ytcfg, 0, mockCallback);
   expect(comments.length).toBe(1);
   expect(comments[0]).toMatchObject({
     cid: 'cid123',
@@ -116,13 +118,16 @@ test('fetchCommentsByContinuation returns comments and continuations', async () 
     reply: false,
   });
   expect(Array.isArray(newContinuations)).toBe(true);
+  expect(mockCallback).toHaveBeenCalledWith(comments, continuation); // Added assertion
 });
 
-test('should yield comments from getComments', async () => {
+test('should yield comments from getComments and call callback', async () => {
   const comments: YoutubeComment[] = [];
-  for await (const comment of getComments('dummy', SortBy.POPULAR)) {
+  const mockCallback: FetchCallback = jest.fn();
+  for await (const comment of getComments('dummy', SortBy.POPULAR, undefined, 0, mockCallback)) {
     comments.push(comment);
   }
   expect(comments.length).toBe(1);
   expect(comments[0].cid).toBe('cid123');
+  expect(mockCallback).toHaveBeenCalledWith(expect.any(Array), expect.any(Object));
 });
