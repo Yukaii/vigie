@@ -45,7 +45,7 @@ function regexSearch(
   return match ? match[group] : def;
 }
 
-  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
 function* searchDict(partial: any, searchKey: string): Generator<any> {
   const stack = [partial];
   while (stack.length) {
@@ -120,7 +120,7 @@ async function ajaxRequest(
 }
 
 // Helper to extract comments and next token from AJAX response
-  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
 function processAjaxResponse(response: any): {
   comments: YoutubeComment[];
   nextContinuationToken: string | null;
@@ -304,8 +304,8 @@ export async function getInitialCrawlData(
 
   // Find the sort menu to get the correct initial continuation endpoint
   let sortMenu =
-    ([...searchDict(data, "sortFilterSubMenuRenderer")][0]
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    (// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    [...searchDict(data, "sortFilterSubMenuRenderer")][0]
       ?.subMenuItems as any[]) || [];
 
   // If sort menu not in initial data, try fetching via ajax (common case)
@@ -316,8 +316,8 @@ export async function getInitialCrawlData(
       // Use the first continuation found to load the comments section data
       data = await ajaxRequest(continuations[0], ytcfg);
       sortMenu =
-        ([...searchDict(data, "sortFilterSubMenuRenderer")][0]
-          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        (// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        [...searchDict(data, "sortFilterSubMenuRenderer")][0]
           ?.subMenuItems as any[]) || [];
     }
   }

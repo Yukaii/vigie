@@ -3,7 +3,11 @@ import type { Context as HonoContext } from "hono";
 import { CrawlSortBy, type CrawlStatusRow, type YoutubeYtcfg } from "../types";
 import { CrawlStatusService } from "../services/crawlStatusService";
 import { CommentService } from "../services/commentService";
-import { SortBy, getInitialCrawlData, fetchCommentPageData } from "../youtube/comment-downloader";
+import {
+  SortBy,
+  getInitialCrawlData,
+  fetchCommentPageData,
+} from "../youtube/comment-downloader";
 // --- End Comment Downloader Imports ---
 
 type Bindings = {
@@ -69,7 +73,9 @@ import type { GetFunctionInput } from "inngest";
 const triggerCommentCrawl = inngest.createFunction(
   { id: "trigger-youtube-comment-crawl", concurrency: 5 },
   { event: "youtube/comment.crawl.trigger" },
-  async (input: GetFunctionInput<typeof inngest, "youtube/comment.crawl.trigger">) => {
+  async (
+    input: GetFunctionInput<typeof inngest, "youtube/comment.crawl.trigger">,
+  ) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
     const supabase = createSupabaseClient(
@@ -183,7 +189,9 @@ const triggerCommentCrawl = inngest.createFunction(
           async () => {
             try {
               if (initialContinuationToken == null) {
-                throw new Error("initialContinuationToken is null or undefined");
+                throw new Error(
+                  "initialContinuationToken is null or undefined",
+                );
               }
               await crawlStatusService.updateCrawlWithInitialToken(
                 crawlId,
@@ -248,7 +256,9 @@ const triggerCommentCrawl = inngest.createFunction(
 const fetchCommentPage = inngest.createFunction(
   { id: "fetch-youtube-comment-page", concurrency: 10, retries: 5 },
   { event: "youtube/comment.page.fetch" },
-  async (input: GetFunctionInput<typeof inngest, "youtube/comment.page.fetch">) => {
+  async (
+    input: GetFunctionInput<typeof inngest, "youtube/comment.page.fetch">,
+  ) => {
     const { event, step, logger, env } = input;
     const { createSupabaseClient } = await import("../db");
     const supabase = createSupabaseClient(
