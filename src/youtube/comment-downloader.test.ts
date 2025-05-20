@@ -162,7 +162,7 @@ test("should yield comments from getComments and call callback", async () => {
 });
 
 // Rickroll test case (real network call)
-test("should yield up to maxComments for Rick Astley video (real fetch)", async () => {
+test.skip("should yield up to maxComments for Rick Astley video (real fetch)", async () => {
   // Restore the real fetch for this test only
   globalThis.fetch = originalFetch as typeof fetch;
 

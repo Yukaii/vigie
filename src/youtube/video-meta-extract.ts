@@ -10,20 +10,40 @@ export interface YoutubeVideoMeta {
 const YOUTUBE_VIDEO_URL = "https://www.youtube.com/watch?v=";
 
 const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 async function fetchWithUserAgent(
   url: string,
   options: RequestInit = {},
 ): Promise<Response> {
-  return fetch(url, {
+  // Create fetch options with extended headers
+  const fetchOptions: RequestInit & { cf?: { cacheEverything: boolean } } = {
     ...options,
     headers: {
       ...(options.headers || {}),
       "User-Agent": USER_AGENT,
       "Accept-Language": "en-US,en;q=0.9",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-User": "?1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Ch-Ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"114\"",
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": "\"Windows\"",
+      "Upgrade-Insecure-Requests": "1",
+      "Priority": "u=0, i",
     },
-  });
+  };
+
+  // Add Cloudflare-specific options if running in a CF environment
+  if (typeof globalThis.caches !== 'undefined') {
+    fetchOptions.cf = {
+      cacheEverything: false,
+    };
+  }
+
+  return fetch(url, fetchOptions);
 }
 
 export async function fetchYoutubeVideoMeta(
