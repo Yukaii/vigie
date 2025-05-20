@@ -115,6 +115,9 @@ async function ajaxRequest(
   };
   for (let i = 0; i < retries; i++) {
     try {
+      // Use a more random delay between retries to appear more human-like
+      const randomDelay = sleep + Math.floor(Math.random() * 1000);
+      
       const res = await fetchWithUserAgent(
         `${url}?key=${encodeURIComponent(ytcfg.INNERTUBE_API_KEY)}`,
         {
@@ -122,17 +125,33 @@ async function ajaxRequest(
           body: JSON.stringify(data),
           headers: {
             "Content-Type": "application/json",
+            "X-YouTube-Client-Name": "1",
+            "X-YouTube-Client-Version": "2.20240518.00.00",
+            "Origin": "https://www.youtube.com",
+            "Referer": "https://www.youtube.com/",
+            "Accept": "*/*",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
           },
         },
       );
+      
       if (res.status === 200) {
         return await res.json();
       }
-      if (res.status === 403 || res.status === 413) {
+      
+      if (res.status === 403 || res.status === 413 || res.status === 429) {
+        console.warn(`YouTube API returned status ${res.status}, retrying (attempt ${i+1}/${retries})...`);
+        // Exponential backoff for 429 errors
+        if (res.status === 429) {
+          await new Promise((resolve) => setTimeout(resolve, randomDelay * Math.pow(2, i)));
+          continue;
+        }
         return {};
       }
     } catch (e) {
-      // ignore
+      console.warn(`Error during ajaxRequest: ${e}, retrying (attempt ${i+1}/${retries})...`);
     }
     await new Promise((resolve) => setTimeout(resolve, sleep));
   }
