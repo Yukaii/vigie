@@ -1,6 +1,8 @@
 // YouTube Comment Downloader (TypeScript)
 // Reference: Python implementation provided by user
 
+import { applyProxyToFetchOptions } from './proxy-config';
+
 export interface YoutubeComment {
   cid: string;
   text: string;
@@ -95,7 +97,16 @@ async function fetchWithUserAgent(
     };
   }
 
-  return fetch(url, fetchOptions);
+  // Apply proxy configuration if enabled
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions);
+
+  try {
+    return await fetch(url, proxiedOptions);
+  } catch (error) {
+    console.warn(`Fetch failed with proxy: ${error}. Retrying without proxy...`);
+    // Fallback to direct connection if proxy fails
+    return fetch(url, fetchOptions);
+  }
 }
 
 async function ajaxRequest(

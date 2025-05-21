@@ -1,4 +1,5 @@
 // YouTube Video Meta Extractor
+import { applyProxyToFetchOptions } from './proxy-config';
 
 export interface YoutubeVideoMeta {
   video_id: string;
@@ -43,7 +44,16 @@ async function fetchWithUserAgent(
     };
   }
 
-  return fetch(url, fetchOptions);
+  // Apply proxy configuration if enabled
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions);
+
+  try {
+    return await fetch(url, proxiedOptions);
+  } catch (error) {
+    console.warn(`Fetch failed with proxy: ${error}. Retrying without proxy...`);
+    // Fallback to direct connection if proxy fails
+    return fetch(url, fetchOptions);
+  }
 }
 
 export async function fetchYoutubeVideoMeta(
