@@ -1,4 +1,5 @@
 // YouTube Video Meta Extractor
+import { applyProxyToFetchOptions } from './proxy-config';
 
 export interface YoutubeVideoMeta {
   video_id: string;
@@ -10,26 +11,59 @@ export interface YoutubeVideoMeta {
 const YOUTUBE_VIDEO_URL = "https://www.youtube.com/watch?v=";
 
 const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 async function fetchWithUserAgent(
   url: string,
   options: RequestInit = {},
 ): Promise<Response> {
-  return fetch(url, {
+  // Create fetch options with extended headers
+  const fetchOptions: RequestInit & { cf?: { cacheEverything: boolean } } = {
     ...options,
     headers: {
       ...(options.headers || {}),
       "User-Agent": USER_AGENT,
       "Accept-Language": "en-US,en;q=0.9",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-User": "?1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Ch-Ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"114\"",
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": "\"Windows\"",
+      "Upgrade-Insecure-Requests": "1",
+      "Priority": "u=0, i",
     },
-  });
+  };
+
+  // Add Cloudflare-specific options if running in a CF environment
+  if (typeof globalThis.caches !== 'undefined') {
+    fetchOptions.cf = {
+      cacheEverything: false,
+    };
+  }
+
+  // Extract domain for sticky session support
+  const domain = new URL(url).hostname;
+
+  // Apply proxy configuration if enabled
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions, domain);
+
+  try {
+    return await fetch(url, proxiedOptions);
+  } catch (error) {
+    console.warn(`Fetch failed with proxy: ${error}. Retrying without proxy...`);
+    // Fallback to direct connection if proxy fails
+    return fetch(url, fetchOptions);
+  }
 }
 
 export async function fetchYoutubeVideoMeta(
   videoId: string,
 ): Promise<YoutubeVideoMeta> {
   const url = YOUTUBE_VIDEO_URL + videoId;
+  const domain = "www.youtube.com"; // For sticky sessions
   const res = await fetchWithUserAgent(url);
 
   if (!res.ok) {

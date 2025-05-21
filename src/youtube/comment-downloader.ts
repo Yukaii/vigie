@@ -1,6 +1,8 @@
 // YouTube Comment Downloader (TypeScript)
 // Reference: Python implementation provided by user
 
+import { applyProxyToFetchOptions } from './proxy-config';
+
 export interface YoutubeComment {
   cid: string;
   text: string;
@@ -25,7 +27,7 @@ const YOUTUBE_VIDEO_URL = "https://www.youtube.com/watch?v=";
 const YOUTUBE_CONSENT_URL = "https://consent.youtube.com/save";
 
 const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
 const YT_CFG_RE = /ytcfg\.set\s*\(\s*({.+?})\s*\)\s*;/;
 const YT_INITIAL_DATA_RE =
@@ -67,15 +69,47 @@ async function fetchWithUserAgent(
   url: string,
   options: RequestInit = {},
 ): Promise<Response> {
-  return fetch(url, {
+  // Create fetch options with extended headers
+  const fetchOptions: RequestInit & { cf?: { cacheEverything: boolean } } = {
     ...options,
     headers: {
       ...(options.headers || {}),
       "User-Agent": USER_AGENT,
       "Accept-Language": "en-US,en;q=0.9",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-User": "?1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Ch-Ua": "\"Not.A/Brand\";v=\"8\", \"Chromium\";v=\"114\"",
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": "\"Windows\"",
+      "Upgrade-Insecure-Requests": "1",
+      "Priority": "u=0, i",
     },
     credentials: "include",
-  });
+  };
+
+  // Add Cloudflare-specific options if running in a CF environment
+  if (typeof globalThis.caches !== 'undefined') {
+    fetchOptions.cf = {
+      cacheEverything: false,
+    };
+  }
+
+  // Extract domain for sticky session support
+  const domain = new URL(url).hostname;
+
+  // Apply proxy configuration if enabled
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions, domain);
+
+  try {
+    return await fetch(url, proxiedOptions);
+  } catch (error) {
+    console.warn(`Fetch failed with proxy: ${error}. Retrying without proxy...`);
+    // Fallback to direct connection if proxy fails
+    return fetch(url, fetchOptions);
+  }
 }
 
 async function ajaxRequest(
@@ -89,12 +123,16 @@ async function ajaxRequest(
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): Promise<any> {
   const url = `https://www.youtube.com${endpoint.commandMetadata.webCommandMetadata.apiUrl}`;
+  const domain = "www.youtube.com"; // Extract domain for sticky session support
   const data = {
     context: ytcfg.INNERTUBE_CONTEXT,
     continuation: endpoint.continuationCommand.token,
   };
   for (let i = 0; i < retries; i++) {
     try {
+      // Use a more random delay between retries to appear more human-like
+      const randomDelay = sleep + Math.floor(Math.random() * 1000);
+      
       const res = await fetchWithUserAgent(
         `${url}?key=${encodeURIComponent(ytcfg.INNERTUBE_API_KEY)}`,
         {
@@ -102,17 +140,33 @@ async function ajaxRequest(
           body: JSON.stringify(data),
           headers: {
             "Content-Type": "application/json",
+            "X-YouTube-Client-Name": "1",
+            "X-YouTube-Client-Version": "2.20240518.00.00",
+            "Origin": "https://www.youtube.com",
+            "Referer": "https://www.youtube.com/",
+            "Accept": "*/*",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Dest": "empty",
           },
         },
       );
+      
       if (res.status === 200) {
         return await res.json();
       }
-      if (res.status === 403 || res.status === 413) {
+      
+      if (res.status === 403 || res.status === 413 || res.status === 429) {
+        console.warn(`YouTube API returned status ${res.status}, retrying (attempt ${i+1}/${retries})...`);
+        // Exponential backoff for 429 errors
+        if (res.status === 429) {
+          await new Promise((resolve) => setTimeout(resolve, randomDelay * Math.pow(2, i)));
+          continue;
+        }
         return {};
       }
     } catch (e) {
-      // ignore
+      console.warn(`Error during ajaxRequest: ${e}, retrying (attempt ${i+1}/${retries})...`);
     }
     await new Promise((resolve) => setTimeout(resolve, sleep));
   }
