@@ -44,8 +44,11 @@ async function fetchWithUserAgent(
     };
   }
 
+  // Extract domain for sticky session support
+  const domain = new URL(url).hostname;
+
   // Apply proxy configuration if enabled
-  const proxiedOptions = applyProxyToFetchOptions(fetchOptions);
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions, domain);
 
   try {
     return await fetch(url, proxiedOptions);
@@ -60,6 +63,7 @@ export async function fetchYoutubeVideoMeta(
   videoId: string,
 ): Promise<YoutubeVideoMeta> {
   const url = YOUTUBE_VIDEO_URL + videoId;
+  const domain = "www.youtube.com"; // For sticky sessions
   const res = await fetchWithUserAgent(url);
 
   if (!res.ok) {

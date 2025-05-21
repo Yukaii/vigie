@@ -78,6 +78,7 @@ export interface Env {
   PROXY_URL?: string;
   PROXY_USERNAME?: string;
   PROXY_PASSWORD?: string;
+  PROXY_CONFIG?: string;  // JSON configuration for multiple proxies
   
   // Other environment variables
   [key: string]: string | undefined;

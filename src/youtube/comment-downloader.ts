@@ -97,8 +97,11 @@ async function fetchWithUserAgent(
     };
   }
 
+  // Extract domain for sticky session support
+  const domain = new URL(url).hostname;
+
   // Apply proxy configuration if enabled
-  const proxiedOptions = applyProxyToFetchOptions(fetchOptions);
+  const proxiedOptions = applyProxyToFetchOptions(fetchOptions, domain);
 
   try {
     return await fetch(url, proxiedOptions);
@@ -120,6 +123,7 @@ async function ajaxRequest(
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 ): Promise<any> {
   const url = `https://www.youtube.com${endpoint.commandMetadata.webCommandMetadata.apiUrl}`;
+  const domain = "www.youtube.com"; // Extract domain for sticky session support
   const data = {
     context: ytcfg.INNERTUBE_CONTEXT,
     continuation: endpoint.continuationCommand.token,
