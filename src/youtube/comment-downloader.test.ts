@@ -162,7 +162,14 @@ test("should yield comments from getComments and call callback", async () => {
 });
 
 // Rickroll test case (real network call)
-test.skip("should yield up to maxComments for Rick Astley video (real fetch)", async () => {
+test("should yield up to maxComments for Rick Astley video (real fetch)", async () => {
+  // Skip in CI environments due to network restrictions
+  // but keep the test enabled for local development
+  if (process.env.CI === 'true') {
+    console.log('Skipping YouTube network test in CI environment');
+    return;
+  }
+  
   // Restore the real fetch for this test only
   globalThis.fetch = originalFetch as typeof fetch;
 
